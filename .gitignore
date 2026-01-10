@@ -75,13 +75,21 @@ dist/
 .cache/
 
 # TraceAI specific
-# TraceAI hook data (DO commit .traceai/gist-url.txt)
-# This directory stores the Gist URL that links to the conversation
+# TraceAI hook data (DO commit .traceai/config.json)
+# config.json stores the Gist URL and metadata
 traceai-output/
 *.artifact.json
 artifact.json
 artifacts/
 *.jsonl.bak
-.traceai/*.json
-.traceai/*.jsonl
+
+# Ignore .traceai cache directory (extension's offline cache)
+.traceai/.cache/
 .traceai/cache/
+
+# Ignore local artifacts.json (prefer config.json which points to Gist)
+.traceai/artifacts.json
+.traceai/*.jsonl
+
+# But DO commit config.json (created by git hooks)
+!.traceai/config.json

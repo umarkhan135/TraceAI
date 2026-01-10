@@ -5,6 +5,7 @@ import sys
 import json
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
 import click
 from rich.console import Console
 from rich.table import Table
@@ -504,14 +505,20 @@ def quick_upload(repo: str, token: Optional[str], public: bool, no_summary: bool
 
     This is designed for git hooks - finds the most recent Claude Code
     conversation, processes it, and uploads to Gist in one command.
-    """
-    import tempfile
 
+    Automatically updates existing Gist if found for the current branch.
+    """
     repo_path = Path(repo).resolve()
+    config_dir = repo_path / '.traceai'
+    config_file = config_dir / 'config.json'
 
     try:
         # Find most recent conversation
-        conv_file = parser.find_conversation_file(str(repo_path))
+        try:
+            conv_file = parser.find_conversation_file(str(repo_path))
+        except ValueError as e:
+            console.print(f"[yellow]⚠ No conversation found: {e}[/yellow]")
+            sys.exit(0)  # Exit gracefully (not an error for git hook)
 
         # Get metadata
         metadata = parser.get_conversation_metadata(conv_file)
@@ -549,21 +556,63 @@ def quick_upload(repo: str, token: Optional[str], public: bool, no_summary: bool
             else:
                 artifact.summary = summarizer.generate_fallback_summary(artifact)
 
-        # Upload to Gist
+        # Check for existing Gist ID in config (for updates)
+        existing_gist_id = None
+        if config_file.exists():
+            try:
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+                    # Check if config has gist_id for current branch
+                    if config.get('branch') == branch:
+                        existing_gist_id = config.get('gist_id')
+                        console.print(f"[dim]Found existing Gist for branch '{branch}', will update...[/dim]")
+            except:
+                pass
+
+        # Upload to Gist (create or update)
         client = github_client.GitHubClient(token)
-        gist = client.create_gist(artifact, public=public)
+
+        if existing_gist_id:
+            # Update existing Gist
+            try:
+                gist = client.update_gist(existing_gist_id, artifact)
+                console.print(f"[green]✓ Gist updated[/green]")
+            except:
+                # If update fails (gist deleted, etc.), create new
+                console.print(f"[yellow]⚠ Could not update existing Gist, creating new...[/yellow]")
+                gist = client.create_gist(artifact, public=public)
+                console.print(f"[green]✓ Gist created[/green]")
+        else:
+            # Create new Gist
+            gist = client.create_gist(artifact, public=public)
+            console.print(f"[green]✓ Gist created[/green]")
 
         # Update artifact with Gist URL
         artifact.metadata.gist_url = gist.html_url
 
+        # Save config file
+        config_dir.mkdir(exist_ok=True)
+        config_data = {
+            "gist_id": gist.id,
+            "gist_url": gist.html_url,
+            "branch": branch,
+            "last_updated": datetime.now().isoformat(),
+            "session_id": metadata['session_id']
+        }
+
+        with open(config_file, 'w') as f:
+            json.dump(config_data, f, indent=2)
+
         # Output Gist URL (for hook to capture)
-        console.print(f"[green]✓ Gist created[/green]")
         console.print(f"Gist URL: {gist.html_url}")
+        console.print(f"Config saved to: {config_file}")
 
         return gist.html_url
 
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]", file=sys.stderr)
+        console.print(f"[red]Error: {e}[/red]")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 
@@ -640,9 +689,15 @@ if [ ! -d "$HOME/.claude/projects" ]; then
   exit 0
 fi
 
-# Check if GITHUB_TOKEN is set
+# Load .env file if it exists (for GITHUB_TOKEN)
+REPO_PATH=$(pwd)
+if [ -f "$REPO_PATH/.env" ]; then
+  export $(grep -v '^#' "$REPO_PATH/.env" | xargs)
+fi
+
+# Check if GITHUB_TOKEN is set (either from env or .env file)
 if [ -z "$GITHUB_TOKEN" ]; then
-  echo "⚠️  TraceAI: GITHUB_TOKEN not set, skipping"
+  echo "⚠️  TraceAI: GITHUB_TOKEN not set in environment or .env, skipping"
   exit 0
 fi
 
@@ -650,22 +705,34 @@ echo "🤖 TraceAI: Processing conversation..."
 
 # Find and upload latest session
 REPO_PATH=$(pwd)
-GIST_URL=$(traceai quick-upload --repo "$REPO_PATH" 2>&1 | grep "Gist URL:" | cut -d' ' -f3)
 
-if [ -n "$GIST_URL" ]; then
-  # Save Gist URL to tracked file
-  mkdir -p .traceai
-  echo "$GIST_URL" > .traceai/gist-url.txt
+# Run quick-upload (handles creating/updating Gist and saving config)
+OUTPUT=$(traceai quick-upload --repo "$REPO_PATH" 2>&1)
+EXIT_CODE=$?
 
-  # Add to git (will be pushed with this push)
-  git add .traceai/gist-url.txt
+if [ $EXIT_CODE -eq 0 ]; then
+  # Extract Gist URL from output
+  GIST_URL=$(echo "$OUTPUT" | grep "Gist URL:" | cut -d' ' -f3)
 
-  # Commit it (with --no-verify to avoid recursive hook)
-  git commit -m "chore: add TraceAI conversation artifact" --no-verify 2>/dev/null || true
+  if [ -n "$GIST_URL" ]; then
+    # Check if config file was created/updated
+    if [ -f ".traceai/config.json" ]; then
+      # Add config to git (will be pushed with this push)
+      git add .traceai/config.json
 
-  echo "✅ TraceAI: Uploaded to $GIST_URL"
+      # Commit it (with --no-verify to avoid recursive hook)
+      git commit -m "chore: update TraceAI conversation artifact" --no-verify 2>/dev/null || true
+
+      echo "✅ TraceAI: Uploaded to $GIST_URL"
+    else
+      echo "⚠️  TraceAI: Config file not found"
+    fi
+  else
+    echo "⚠️  TraceAI: Could not extract Gist URL"
+  fi
 else
   echo "⚠️  TraceAI: Upload failed or no conversation found"
+  echo "$OUTPUT" | grep -i "error" || true
 fi
 
 # Continue with push
