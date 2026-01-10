@@ -1,0 +1,93 @@
+name: TraceAI PR Summary
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  update-pr:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Check for TraceAI Gist URL
+        id: check
+        run: |
+          if [ -f .traceai/gist-url.txt ]; then
+            GIST_URL=$(cat .traceai/gist-url.txt)
+            echo "gist_url=$GIST_URL" >> $GITHUB_OUTPUT
+            echo "found=true" >> $GITHUB_OUTPUT
+            echo "✅ Found TraceAI Gist: $GIST_URL"
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+            echo "⚠️  No TraceAI Gist URL found"
+          fi
+
+      - name: Setup Python
+        if: steps.check.outputs.found == 'true'
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install TraceAI
+        if: steps.check.outputs.found == 'true'
+        run: |
+          cd pipeline
+          pip install -e . --quiet
+
+      - name: Download artifact from Gist
+        if: steps.check.outputs.found == 'true'
+        run: |
+          # Extract Gist ID from URL
+          GIST_URL="${{ steps.check.outputs.gist_url }}"
+          GIST_ID=$(echo $GIST_URL | rev | cut -d'/' -f1 | rev)
+
+          echo "📥 Downloading conversation from Gist $GIST_ID..."
+
+          # Fetch Gist content using GitHub API
+          curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/gists/$GIST_ID" | \
+            jq -r '.files["conversation.json"].content' > artifact.json
+
+          if [ ! -s artifact.json ]; then
+            echo "❌ Failed to download artifact from Gist"
+            exit 1
+          fi
+
+          echo "✅ Downloaded artifact successfully"
+
+      - name: Generate PR summary
+        if: steps.check.outputs.found == 'true'
+        run: |
+          cd pipeline
+          source venv/bin/activate 2>/dev/null || true
+
+          echo "📝 Generating PR summary..."
+          traceai pr-summary ../artifact.json --output ../pr-summary.md
+
+          echo "✅ Generated PR summary"
+
+      - name: Update PR description
+        if: steps.check.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🔄 Updating PR #${{ github.event.pull_request.number }}..."
+
+          gh pr edit ${{ github.event.pull_request.number }} \
+            --body-file pr-summary.md
+
+          echo "✅ PR description updated with AI summary"
+
+      - name: Comment on PR (optional)
+        if: steps.check.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} \
+            --body "🤖 **TraceAI**: This PR includes AI-generated code. [View conversation](${{ steps.check.outputs.gist_url }})"
