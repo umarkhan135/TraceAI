@@ -1,0 +1,82 @@
+{
+  "name": "traceai",
+  "displayName": "TraceAI",
+  "description": "View AI prompt provenance for code - see which prompts generated your code",
+  "version": "0.0.1",
+  "publisher": "traceai",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "TraceAI",
+      "properties": {
+        "traceai.githubToken": {
+          "type": "string",
+          "default": "",
+          "description": "GitHub personal access token for fetching Gist data"
+        },
+        "traceai.enableHover": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable hover tooltips showing AI prompt provenance"
+        },
+        "traceai.cacheExpiration": {
+          "type": "number",
+          "default": 3600,
+          "description": "Cache expiration time in seconds"
+        },
+        "traceai.showGutterIcons": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show gutter icons for AI-generated code"
+        },
+        "traceai.showFileStats": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show AI generation stats in file explorer"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "traceai.refreshCache",
+        "title": "TraceAI: Refresh Cache"
+      },
+      {
+        "command": "traceai.showConversation",
+        "title": "TraceAI: Show Full Conversation"
+      },
+      {
+        "command": "traceai.showCacheStats",
+        "title": "TraceAI: Show Cache Stats"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "eslint": "^8.54.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "@octokit/rest": "^20.0.2"
+  }
+}
