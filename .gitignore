@@ -1,3 +1,10 @@
+# Environment variables (secrets)
+.env
+.env.local
+*.pem
+*.key
+secrets/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -20,7 +27,6 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
-
 demo/*
 
 # Virtual environments
@@ -35,7 +41,10 @@ env/
 *.swp
 *.swo
 *~
+
+# OS
 .DS_Store
+Thumbs.db
 
 # Testing
 .pytest_cache/
@@ -60,25 +69,19 @@ yarn-error.log*
 out/
 dist/
 
-# Secrets
-.env
-.env.local
-*.pem
-*.key
-secrets/
-
 # Temporary files
 *.log
 *.tmp
 .cache/
 
 # TraceAI specific
+# TraceAI hook data (DO commit .traceai/gist-url.txt)
+# This directory stores the Gist URL that links to the conversation
 traceai-output/
 *.artifact.json
-
-# TraceAI hook data (DO commit .traceai/gist-url.txt)
-# This directory contains the Gist URL that links to the conversation
-# The gist-url.txt file should be committed so GitHub Actions can read it
+artifact.json
+artifacts/
+*.jsonl.bak
 .traceai/*.json
 .traceai/*.jsonl
 .traceai/cache/

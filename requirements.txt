@@ -1,0 +1,19 @@
+# TraceAI Python Dependencies
+
+# GitHub API client
+PyGithub==2.1.1
+
+# Git operations
+gitpython==3.1.40
+
+# Data validation
+pydantic==2.5.3
+
+# Environment variables
+python-dotenv==1.0.0
+
+# CLI argument parsing (built-in, listed for reference)
+# argparse - standard library
+
+# Optional: AI summarization (stretch goal)
+# anthropic==0.8.1
