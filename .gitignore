@@ -1,5 +1,9 @@
 # Environment variables (secrets)
 .env
+.env.local
+*.pem
+*.key
+secrets/
 
 # Python
 __pycache__/
@@ -7,14 +11,31 @@ __pycache__/
 *$py.class
 *.so
 .Python
-venv/
-env/
-ENV/
-*.egg-info/
-dist/
 build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+demo/*
 
-# IDE
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# IDEs
 .vscode/
 .idea/
 *.swp
@@ -25,7 +46,42 @@ build/
 .DS_Store
 Thumbs.db
 
-# Test artifacts
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Node (for extension)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+
+# Build outputs
+*.vsix
+out/
+dist/
+
+# Temporary files
+*.log
+*.tmp
+.cache/
+
+# TraceAI specific
+# TraceAI hook data (DO commit .traceai/gist-url.txt)
+# This directory stores the Gist URL that links to the conversation
+traceai-output/
+*.artifact.json
 artifact.json
 artifacts/
 *.jsonl.bak
+.traceai/*.json
+.traceai/*.jsonl
+.traceai/cache/

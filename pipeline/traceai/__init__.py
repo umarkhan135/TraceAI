@@ -1,11 +1,16 @@
 """
-TraceAI - LLM-Native Code Provenance Tracking Pipeline
-
-This package provides tools to:
-- Parse Claude Code conversations (JSONL format)
-- Map prompts to code changes (tool calls + git blame)
-- Upload conversation artifacts to GitHub Gist
-- Generate PR summaries with conversation context
+TraceAI - LLM-native code provenance and PR review tool.
 """
 
 __version__ = "0.1.0"
+
+from . import parser, mapper, github_client, markdown_gen, models, summarizer
+
+__all__ = [
+    "parser",
+    "mapper",
+    "github_client",
+    "markdown_gen",
+    "models",
+    "summarizer",
+]

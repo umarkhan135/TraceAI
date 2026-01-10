@@ -3,11 +3,12 @@ Pydantic models for TraceAI conversation artifacts.
 
 These models define the JSON schema for storing and transmitting
 conversation data, ensuring type safety and validation.
+
+Data models for TraceAI conversation artifacts.
 """
 
-from datetime import datetime
-from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field, HttpUrl
+from typing import Any, Dict, List, Optional, Union
+from pydantic import BaseModel, Field
 
 
 class ToolCall(BaseModel):
@@ -25,8 +26,8 @@ class ConversationMessage(BaseModel):
     role: str = Field(..., description="Message role: 'user' or 'assistant'")
     content: str = Field(..., description="Message content (text)")
     timestamp: str = Field(..., description="ISO 8601 timestamp")
-    tool_calls: Optional[List[ToolCall]] = Field(
-        default=None,
+    tool_calls: List[ToolCall] = Field(
+        default_factory=list,
         description="Tool calls (for assistant messages only)"
     )
     usage: Optional[Dict[str, Any]] = Field(
@@ -59,6 +60,17 @@ class PromptCodeMapping(BaseModel):
     )
 
 
+class CodeMapping(PromptCodeMapping):
+    """Maps a prompt to specific code changes (compatibility alias)."""
+
+    confidence: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Mapping confidence score (0.0-1.0)"
+    )
+
+
 class ArtifactMetadata(BaseModel):
     """Metadata about the conversation artifact."""
 
@@ -67,7 +79,10 @@ class ArtifactMetadata(BaseModel):
     repo_path: str = Field(..., description="Absolute path to git repository")
     branch: Optional[str] = Field(default=None, description="Git branch name")
     start_time: Optional[str] = Field(default=None, description="Conversation start timestamp")
-    end_time: str = Field(..., description="Conversation end timestamp")
+    end_time: Optional[str] = Field(
+        default=None,
+        description="Conversation end timestamp"
+    )
     duration_seconds: Optional[float] = Field(
         default=None,
         description="Total conversation duration in seconds"
@@ -93,6 +108,19 @@ class ArtifactStats(BaseModel):
         default=None,
         description="Estimated number of AI-generated lines of code"
     )
+
+
+class ConversationStats(ArtifactStats):
+    """Statistics about the conversation (compatibility alias)."""
+    pass
+
+
+class ConversationSummary(BaseModel):
+    """AI-generated summary of the conversation (stretch goal)."""
+
+    key_decisions: List[str] = Field(default_factory=list)
+    files_summary: Dict[str, str] = Field(default_factory=dict)  # file -> description
+    overview: Optional[str] = None
 
 
 class ConversationArtifact(BaseModel):
@@ -121,7 +149,7 @@ class ConversationArtifact(BaseModel):
         description="Full conversation history"
     )
     stats: ArtifactStats = Field(..., description="Summary statistics")
-    summary: Optional[Dict[str, Any]] = Field(
+    summary: Optional[Union[ConversationSummary, Dict[str, Any]]] = Field(
         default=None,
         description="Optional AI-generated summary"
     )
@@ -170,6 +198,14 @@ class ConversationArtifact(BaseModel):
             }
         }
 
+    def to_json_dict(self) -> Dict[str, Any]:
+        """Convert to JSON-serializable dict."""
+        return self.model_dump(mode='json')
+
+    def to_json_string(self, indent: int = 2) -> str:
+        """Convert to formatted JSON string."""
+        return self.model_dump_json(indent=indent)
+
 
 class GistUploadRequest(BaseModel):
     """Request model for uploading a conversation artifact to Gist."""
@@ -207,3 +243,39 @@ class GistUploadResponse(BaseModel):
                 "created_at": "2026-01-10T16:00:00Z"
             }
         }
+
+
+# Raw JSONL entry models (for parsing)
+
+class RawUserMessage(BaseModel):
+    """Raw user message from JSONL."""
+
+    type: str = "user"
+    uuid: str
+    parentUuid: Optional[str] = None
+    timestamp: str
+    sessionId: str
+    cwd: str
+    message: Dict[str, Any]
+
+
+class RawAssistantMessage(BaseModel):
+    """Raw assistant message from JSONL."""
+
+    type: str = "assistant"
+    uuid: str
+    parentUuid: Optional[str] = None
+    timestamp: str
+    sessionId: str
+    message: Dict[str, Any]
+
+
+class RawToolResult(BaseModel):
+    """Raw tool result from JSONL."""
+
+    type: str = "tool_result"
+    uuid: str
+    parentUuid: Optional[str] = None
+    timestamp: str
+    sessionId: str
+    message: Dict[str, Any]
