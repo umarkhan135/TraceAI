@@ -22,7 +22,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { ConversationArtifact, CodeMapping } from './types';
-import { localLoader } from './localLoader';
+import { unifiedLoader } from './unifiedLoader';
 
 /**
  * TraceAIHoverProvider implements VSCode's HoverProvider interface.
@@ -78,10 +78,11 @@ export class TraceAIHoverProvider implements vscode.HoverProvider {
     const lineNumber = position.line + 1;
 
     // -----------------------------------------------------------------------
-    // STEP 4: Load the TraceAI artifact from .traceai/artifacts.json
+    // STEP 4: Load the TraceAI artifact (from config.json -> Gist or local)
     // -----------------------------------------------------------------------
-    // The artifact contains all the prompt-to-code mappings
-    const artifact = await localLoader.loadArtifact(workspaceFolder.uri.fsPath);
+    // The unified loader checks for config.json first, then fetches from Gist,
+    // and falls back to local artifacts.json for backward compatibility
+    const artifact = await unifiedLoader.loadArtifact(workspaceFolder.uri.fsPath);
     if (!artifact) {
       return null;  // No artifact found, nothing to show
     }
@@ -328,9 +329,9 @@ export class TraceAIHoverProvider implements vscode.HoverProvider {
    * -------------------------------------------------------------------------
    *
    * Called when user runs "TraceAI: Refresh Cache" command.
-   * Forces the extension to reload artifacts.json from disk.
+   * Forces the extension to reload artifacts from Gist or disk.
    */
   clearCache(): void {
-    localLoader.clearCache();
+    unifiedLoader.clearCache();
   }
 }

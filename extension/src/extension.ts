@@ -18,6 +18,7 @@
 import * as vscode from 'vscode';
 import { TraceAIHoverProvider } from './hoverProvider';
 import { localLoader } from './localLoader';
+import { unifiedLoader } from './unifiedLoader';
 import { cache } from './cache';
 import { githubClient } from './githubClient';
 
@@ -36,9 +37,13 @@ export function activate(context: vscode.ExtensionContext) {
       // Initialize cache with workspace path (for .vscode/ storage)
       cache.initialize(folder.uri.fsPath);
 
-      // Set up file watcher for local artifacts
-      const watcher = localLoader.createFileWatcher(folder.uri.fsPath);
-      context.subscriptions.push(watcher);
+      // Set up file watcher for config.json (triggers Gist refetch)
+      const configWatcher = unifiedLoader.createConfigWatcher(folder.uri.fsPath);
+      context.subscriptions.push(configWatcher);
+
+      // Set up file watcher for local artifacts (backward compatibility)
+      const artifactsWatcher = localLoader.createFileWatcher(folder.uri.fsPath);
+      context.subscriptions.push(artifactsWatcher);
 
       console.log(`TraceAI: Initialized for workspace: ${folder.name}`);
     }

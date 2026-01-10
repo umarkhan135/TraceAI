@@ -103,8 +103,11 @@ class GitHubClient:
             # Build response
             response = GistUploadResponse(
                 gist_id=gist.id,
+                id=gist.id,
                 gist_url=gist.url,
                 html_url=gist.html_url,
+                public=public,
+                description=description,
                 created_at=gist.created_at.isoformat()
             )
 
@@ -209,8 +212,8 @@ class GitHubClient:
         md.append(f"- **Session ID**: `{artifact.metadata.session_id}`")
         if artifact.metadata.pr_number:
             md.append(f"- **PR Number**: #{artifact.metadata.pr_number}")
-        if artifact.metadata.repo_name:
-            md.append(f"- **Repository**: {artifact.metadata.repo_name}")
+        if artifact.metadata.repo_path:
+            md.append(f"- **Repository**: {artifact.metadata.repo_path}")
         if artifact.metadata.branch:
             md.append(f"- **Branch**: `{artifact.metadata.branch}`")
         md.append(f"- **Started**: {artifact.metadata.start_time}")
@@ -249,7 +252,7 @@ class GitHubClient:
                 md.append("")
 
                 for i, mapping in enumerate(file_mappings, 1):
-                    prompt_preview = mapping.prompt[:80] + "..." if len(mapping.prompt) > 80 else mapping.prompt
+                    prompt_preview = mapping.prompt_preview
                     md.append(f"{i}. **{prompt_preview}**")
                     md.append(f"   - Tool: `{mapping.tool}`")
                     if mapping.lines:
@@ -279,6 +282,84 @@ class GitHubClient:
         md.append(f"Artifact Version {artifact.version}*")
 
         return "\n".join(md)
+
+    def create_gist(
+        self,
+        artifact: ConversationArtifact,
+        public: bool = False
+    ) -> GistUploadResponse:
+        """
+        Create a new Gist with conversation artifact.
+
+        Args:
+            artifact: ConversationArtifact to upload
+            public: Whether to create a public or secret Gist
+
+        Returns:
+            GistUploadResponse with Gist URLs
+        """
+        description = f"TraceAI Conversation (PR #{artifact.metadata.pr_number})" if artifact.metadata.pr_number else "TraceAI Conversation"
+        return self.upload_artifact_to_gist(
+            artifact,
+            description=description,
+            public=public
+        )
+
+    def create_or_update_gist(
+        self,
+        artifact: ConversationArtifact,
+        existing_gist_id: Optional[str] = None,
+        public: bool = False
+    ) -> GistUploadResponse:
+        """
+        Create a new Gist or update an existing one.
+
+        Args:
+            artifact: ConversationArtifact to upload
+            existing_gist_id: ID of existing Gist to update (None = create new)
+            public: Whether to create a public or secret Gist
+
+        Returns:
+            GistUploadResponse with Gist URLs
+        """
+        if existing_gist_id:
+            # Update existing Gist
+            try:
+                gist = self.github.get_gist(existing_gist_id)
+
+                # Update files
+                artifact_json = artifact.model_dump(mode='json')
+                files = {
+                    "conversation.json": InputFileContent(
+                        json.dumps(artifact_json, indent=2)
+                    )
+                }
+
+                # Optionally update Markdown
+                markdown_content = self._generate_markdown_summary(artifact)
+                files["README.md"] = InputFileContent(markdown_content)
+
+                gist.edit(files=files)
+
+                return GistUploadResponse(
+                    gist_id=gist.id,
+                    id=gist.id,
+                    gist_url=gist.url,
+                    html_url=gist.html_url,
+                    public=gist.public,
+                    description=gist.description or "",
+                    created_at=gist.created_at.isoformat()
+                )
+
+            except GithubException as e:
+                raise GithubException(
+                    status=e.status,
+                    data={"message": f"Failed to update Gist: {e.data.get('message', 'Unknown error')}"},
+                    headers=e.headers
+                )
+        else:
+            # Create new Gist
+            return self.create_gist(artifact, public=public)
 
     def get_rate_limit(self) -> dict:
         """

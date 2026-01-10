@@ -40,16 +40,20 @@ export class GitHubClient {
     }
 
     try {
+      console.log(`TraceAI: Attempting to fetch Gist ${gistId}...`);
       const response = await this.octokit.gists.get({ gist_id: gistId });
       const gist = response.data;
+      console.log(`TraceAI: Gist fetched successfully, files:`, Object.keys(gist.files || {}));
 
       // Find the TraceAI artifact file (look for .json file)
       const files = gist.files;
       if (!files) {
+        console.error('TraceAI: Gist has no files');
         return null;
       }
 
       for (const filename of Object.keys(files)) {
+        console.log(`TraceAI: Checking file: ${filename}`);
         if (filename.endsWith('.json')) {
           const file = files[filename];
           if (file?.content) {
@@ -58,21 +62,28 @@ export class GitHubClient {
 
               // Validate it's a TraceAI artifact
               if (artifact.version && artifact.mappings && artifact.conversation) {
+                console.log(`TraceAI: Valid artifact found in ${filename}`);
                 await cache.set(gistId, artifact, cacheExpiration);
                 return artifact;
+              } else {
+                console.warn(`TraceAI: ${filename} is not a valid TraceAI artifact`);
               }
-            } catch {
-              // Not valid JSON or not a TraceAI artifact
+            } catch (parseError) {
+              console.error(`TraceAI: Failed to parse ${filename}:`, parseError);
               continue;
             }
+          } else {
+            console.warn(`TraceAI: ${filename} has no content`);
           }
         }
       }
 
+      console.error('TraceAI: No valid artifact found in Gist');
       return null;
     } catch (error) {
       if (error instanceof Error) {
         console.error(`TraceAI: Failed to fetch Gist ${gistId}:`, error.message);
+        console.error(`TraceAI: Full error:`, error);
       }
       return null;
     }

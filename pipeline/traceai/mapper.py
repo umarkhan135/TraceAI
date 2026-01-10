@@ -94,12 +94,9 @@ def extract_code_mappings(
                 'file': file_path,
                 'lines': lines,
                 'prompt_index': i,
-                'prompt': prompt,
                 'prompt_preview': prompt[:100] + '...' if len(prompt) > 100 else prompt,
-                'prompt_timestamp': prompt_timestamp,
-                'assistant_response': assistant_text[:200],
-                'tool': tool_name,
                 'timestamp': entry['timestamp'],
+                'tool': tool_name,
                 'tool_input': tool_input,
                 'confidence': confidence,
             }

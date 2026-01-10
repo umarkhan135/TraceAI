@@ -290,12 +290,13 @@ def pr_summary(artifact_file: str, output: Optional[str], compact: bool, timelin
             gist_url = "https://gist.github.com/YOUR_GIST_ID"
 
         # Generate markdown
+        generator = markdown_gen.MarkdownGenerator(artifact, gist_url)
         if compact:
-            md = markdown_gen.generate_compact_summary(artifact, gist_url)
+            md = generator.generate_pr_summary(include_highlights=False)
         elif timeline:
-            md = markdown_gen.generate_full_report(artifact, gist_url, include_timeline=True)
+            md = generator.generate_pr_summary(max_highlights=10)
         else:
-            md = markdown_gen.generate_pr_summary(artifact, gist_url)
+            md = generator.generate_pr_summary()
 
         # Output
         if output:
@@ -398,6 +399,30 @@ def pipeline(
 
         if result.exit_code != 0:
             raise Exception("Upload step failed")
+
+        console.print()
+
+        # Create .traceai/config.json for VSCode extension
+        with open(artifact_file, 'r') as f:
+            updated_artifact = ConversationArtifact.model_validate_json(f.read())
+
+        if updated_artifact.metadata.gist_url:
+            traceai_dir = repo_path / '.traceai'
+            traceai_dir.mkdir(exist_ok=True)
+            config_file = traceai_dir / 'config.json'
+
+            config_data = {
+                'gist_id': updated_artifact.metadata.gist_url.split('/')[-1],
+                'gist_url': updated_artifact.metadata.gist_url,
+                'pr_number': pr_number,
+                'session_id': updated_artifact.metadata.session_id,
+                'last_updated': updated_artifact.metadata.end_time
+            }
+
+            with open(config_file, 'w') as f:
+                json.dump(config_data, f, indent=2)
+
+            console.print(f"[green]✓[/green] Created {config_file} for VSCode extension")
 
         console.print()
 
