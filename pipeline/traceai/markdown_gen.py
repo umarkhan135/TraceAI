@@ -8,6 +8,32 @@ from typing import Optional, List
 from .models import ConversationArtifact, PromptCodeMapping
 
 
+def format_duration(seconds: float) -> str:
+    """
+    Format duration in seconds to human-readable string.
+
+    Args:
+        seconds: Duration in seconds
+
+    Returns:
+        Formatted string (e.g., "5 minutes", "1 hour 30 minutes")
+    """
+    if seconds < 60:
+        return f"{int(seconds)} seconds"
+
+    minutes = int(seconds / 60)
+    if minutes < 60:
+        return f"{minutes} minute{'s' if minutes != 1 else ''}"
+
+    hours = minutes // 60
+    remaining_minutes = minutes % 60
+
+    if remaining_minutes == 0:
+        return f"{hours} hour{'s' if hours != 1 else ''}"
+
+    return f"{hours} hour{'s' if hours != 1 else ''} {remaining_minutes} minute{'s' if remaining_minutes != 1 else ''}"
+
+
 class MarkdownGenerator:
     """Generate markdown summaries for PRs with AI conversation context."""
 

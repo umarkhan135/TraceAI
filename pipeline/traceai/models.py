@@ -229,8 +229,11 @@ class GistUploadResponse(BaseModel):
     """Response model after uploading to Gist."""
 
     gist_id: str = Field(..., description="GitHub Gist ID")
-    gist_url: str = Field(..., description="URL to the Gist")
+    id: str = Field(..., description="GitHub Gist ID (alias for compatibility)")
+    gist_url: str = Field(..., description="API URL to the Gist")
     html_url: str = Field(..., description="Human-readable Gist URL")
+    public: bool = Field(default=False, description="Whether the Gist is public")
+    description: str = Field(default="", description="Gist description")
     created_at: str = Field(..., description="When the Gist was created")
 
     class Config:
@@ -238,8 +241,11 @@ class GistUploadResponse(BaseModel):
         json_schema_extra = {
             "example": {
                 "gist_id": "abc123def456",
+                "id": "abc123def456",
                 "gist_url": "https://api.github.com/gists/abc123def456",
                 "html_url": "https://gist.github.com/username/abc123def456",
+                "public": False,
+                "description": "TraceAI Conversation",
                 "created_at": "2026-01-10T16:00:00Z"
             }
         }
