@@ -945,23 +945,20 @@ if [ $EXIT_CODE -eq 0 ]; then
   if [ -n "$GIST_URL" ]; then
     # Check if config file was created/updated
     if [ -f ".traceai/config.json" ]; then
-      # Check if config.json has changed
-      if ! git diff --quiet .traceai/config.json 2>/dev/null; then
+      # Check if config.json has changed (unstaged or new)
+      if ! git diff --quiet .traceai/config.json 2>/dev/null || ! git ls-files --error-unmatch .traceai/config.json >/dev/null 2>&1; then
         echo "✅ TraceAI: Uploaded to $GIST_URL"
         echo ""
-        echo "📝 Adding TraceAI config to commit..."
+        echo "📝 Adding TraceAI config to new commit..."
 
         # Add config to git
         git add .traceai/config.json
 
-        # Amend the last commit to include the config
-        # This works because we're in pre-push, before the push happens
-        git commit --amend --no-edit --no-verify 2>/dev/null || {
-          # If amend fails (maybe nothing to amend), create new commit
-          git commit -m "chore: update TraceAI conversation artifact" --no-verify 2>/dev/null || true
-        }
+        # Create a NEW commit (don't amend) so it gets pushed
+        # Use --no-verify to prevent infinite loop
+        git commit -m "chore: update TraceAI conversation artifact" --no-verify
 
-        echo "✓ Config included in commit"
+        echo "✓ Config committed and will be pushed"
       else
         echo "✅ TraceAI: Config already up to date"
       fi
@@ -983,30 +980,8 @@ exit 0
     elif hook_type == 'post-commit':
         return '''#!/bin/bash
 # TraceAI post-commit hook
-# Note: pre-push is recommended instead of post-commit
-
-# Only run if Claude Code directory exists
-if [ ! -d "$HOME/.claude/projects" ]; then
-  exit 0
-fi
-
-# Check if GITHUB_TOKEN is set
-if [ -z "$GITHUB_TOKEN" ]; then
-  exit 0
-fi
-
-echo "🤖 TraceAI: Processing conversation..."
-
-REPO_PATH=$(pwd)
-GIST_URL=$(traceai quick-upload --repo "$REPO_PATH" 2>&1 | grep "Gist URL:" | cut -d' ' -f3)
-
-if [ -n "$GIST_URL" ]; then
-  mkdir -p .traceai
-  echo "$GIST_URL" > .traceai/gist-url.txt
-  git add .traceai/gist-url.txt
-  git commit --amend --no-edit --no-verify
-  echo "✅ TraceAI: Uploaded to $GIST_URL"
-fi
+# DISABLED - TraceAI now uses pre-push hook instead
+# This ensures the config is included in the push without needing to push twice
 
 exit 0
 '''
