@@ -5,7 +5,7 @@
 
 ## 🎯 Vision
 
-Build the future of code review for the AI-native era. Every line of code should trace back to the conversation that created it. PR reviews should include not just the diff, but the full context of the AI collaboration that produced it.
+Build the future of code review for the AI-native era. Every line of code should trace back to the conversation that created it. PR reviews should include not just the diff, but the full context of the AI collaboration that produced it. (testing)
 
 ---
 
