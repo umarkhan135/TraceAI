@@ -218,5 +218,16 @@ def find_user_prompt_for_message(
     # Look backwards for the most recent user message
     for i in range(current_index - 1, -1, -1):
         if messages[i].get('type') == 'user':
+            # Make sure it's a real user prompt, not a tool_result
+            content = messages[i].get('message', {}).get('content', '')
+            # Skip tool_result messages (they have content as list with tool_use_id)
+            if isinstance(content, list):
+                # Check if it's all tool results
+                is_tool_result = all(
+                    isinstance(item, dict) and 'tool_use_id' in item
+                    for item in content
+                )
+                if is_tool_result:
+                    continue  # Skip this, keep looking
             return messages[i]
     return None

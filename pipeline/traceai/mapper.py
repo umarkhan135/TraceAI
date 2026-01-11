@@ -56,8 +56,8 @@ def extract_code_mappings(
         if not user_message:
             continue
 
-        prompt = extract_text_from_message(user_message['message'].get('content', ''))
-        prompt_timestamp = user_message['timestamp']
+        prompt = extract_text_from_message(user_message.get('message', {}).get('content', ''))
+        prompt_timestamp = user_message.get('timestamp')
 
         # Process each tool call
         for tool_call in tool_calls:
