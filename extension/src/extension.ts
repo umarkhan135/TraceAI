@@ -113,6 +113,12 @@ export function activate(context: vscode.ExtensionContext) {
   });
   context.subscriptions.push(onDidSaveTextDocument);
 
+  // Update decorations when cursor position changes (to show only on current line)
+  const onDidChangeTextEditorSelection = vscode.window.onDidChangeTextEditorSelection(e => {
+    decorationProvider.updateDecorations(e.textEditor);
+  });
+  context.subscriptions.push(onDidChangeTextEditorSelection);
+
   // Update decorations when config changes
   const onDidChangeConfiguration = vscode.workspace.onDidChangeConfiguration(e => {
     if (e.affectsConfiguration('traceai')) {

@@ -69,6 +69,9 @@ export class TraceAIDecorationProvider {
       return;
     }
 
+    // Get current cursor line (1-indexed)
+    const currentLine = editor.selection.active.line + 1;
+
     // Build decorations for this file
     const decorations: vscode.DecorationOptions[] = [];
     const decorationInfos: DecorationInfo[] = [];
@@ -76,47 +79,61 @@ export class TraceAIDecorationProvider {
     // Group mappings by line to handle conflicts (multiple mappings for same line)
     const lineToMapping = this.groupMappingsByLine(artifact, relativePath);
 
-    // Create decorations for each line
-    for (const [lineNumber, mapping] of lineToMapping) {
-      const line = lineNumber - 1; // Convert to 0-indexed
+    // Only create decoration for the current cursor line
+    const mapping = lineToMapping.get(currentLine);
+    if (mapping) {
+      const line = currentLine - 1; // Convert to 0-indexed
 
-      if (line < 0 || line >= document.lineCount) {
-        continue; // Skip invalid lines
-      }
+      if (line >= 0 && line < document.lineCount) {
+        // Get the line content to position the decoration at the end
+        const lineText = document.lineAt(line);
+        const endPosition = new vscode.Position(line, lineText.text.length);
 
-      // Get the line content to position the decoration at the end
-      const lineText = document.lineAt(line);
-      const endPosition = new vscode.Position(line, lineText.text.length);
+        // Build the decoration text
+        const decorationText = this.buildDecorationText(mapping, artifact);
 
-      // Build the decoration text
-      const decorationText = this.buildDecorationText(mapping, artifact);
-
-      // Create the decoration
-      const decoration: vscode.DecorationOptions = {
-        range: new vscode.Range(endPosition, endPosition),
-        renderOptions: {
-          after: {
-            contentText: decorationText,
+        // Create the decoration
+        const decoration: vscode.DecorationOptions = {
+          range: new vscode.Range(endPosition, endPosition),
+          renderOptions: {
+            after: {
+              contentText: decorationText,
+            },
           },
-        },
-      };
+        };
 
-      decorations.push(decoration);
+        decorations.push(decoration);
 
-      // Store decoration info for hover detection
-      decorationInfos.push({
-        line: lineNumber,
-        range: new vscode.Range(endPosition, endPosition),
-        mapping: mapping,
-        artifact: artifact,
-      });
+        // Store decoration info for hover detection
+        decorationInfos.push({
+          line: currentLine,
+          range: new vscode.Range(endPosition, endPosition),
+          mapping: mapping,
+          artifact: artifact,
+        });
+      }
     }
 
     // Apply decorations to editor
     editor.setDecorations(this.decorationType, decorations);
 
-    // Cache decoration info for hover
-    this.fileDecorations.set(document.uri.toString(), decorationInfos);
+    // Cache decoration info for hover (store all mappings for hover to work on any line)
+    // But only show decoration on current line
+    const allDecorationInfos: DecorationInfo[] = [];
+    for (const [lineNumber, mapping] of lineToMapping) {
+      const line = lineNumber - 1;
+      if (line >= 0 && line < document.lineCount) {
+        const lineText = document.lineAt(line);
+        const endPosition = new vscode.Position(line, lineText.text.length);
+        allDecorationInfos.push({
+          line: lineNumber,
+          range: new vscode.Range(endPosition, endPosition),
+          mapping: mapping,
+          artifact: artifact,
+        });
+      }
+    }
+    this.fileDecorations.set(document.uri.toString(), allDecorationInfos);
 
     console.log(`TraceAI: Applied ${decorations.length} decorations to ${path.basename(document.fileName)}`);
   }
@@ -169,7 +186,7 @@ export class TraceAIDecorationProvider {
 
   /**
    * Build the decoration text to display
-   * Format: "(PR #42) 'Add logout button...'"
+   * Format: "(PR #42) 'Add logout button...'" or "(Prompt #5) 'Add logout button...'"
    */
   private buildDecorationText(mapping: CodeMapping, artifact: ConversationArtifact): string {
     const prNumber = artifact.metadata.pr_number;
@@ -178,7 +195,8 @@ export class TraceAIDecorationProvider {
     if (prNumber) {
       return `(PR #${prNumber}) '${promptPreview}'`;
     } else {
-      return `(AI) '${promptPreview}'`;
+      // Show prompt index when no PR number
+      return `(Prompt #${mapping.prompt_index}) '${promptPreview}'`;
     }
   }
 
@@ -211,12 +229,15 @@ export class TraceAIDecorationProvider {
     }
 
     // Check if position is on the same line as any decoration
-    // We'll be lenient and consider the entire line after the code as hoverable
+    // Consider it hoverable if cursor is past the end of the actual code
     for (const decoration of decorations) {
       if (position.line + 1 === decoration.line) {
-        // Check if cursor is at or after the end of the code line
+        // Check if cursor is after the end of the code line (in the decoration area)
         const lineText = document.lineAt(position.line);
-        if (position.character >= lineText.text.trimEnd().length) {
+        const codeEndPos = lineText.text.trimEnd().length;
+
+        // If cursor is at or past the end of the code, it's on the decoration
+        if (position.character >= codeEndPos) {
           return decoration;
         }
       }

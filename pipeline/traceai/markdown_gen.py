@@ -207,10 +207,9 @@ class MarkdownGenerator:
             # Last prompt
             highlights.append(user_messages[-1])
 
-        # Format highlights
+        # Format highlights - show full prompts
         for i, msg in enumerate(highlights, 1):
-            content_preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
-            lines.append(f"**Prompt {i}**: \"{content_preview}\"")
+            lines.append(f"**Prompt {i}**: \"{msg.content}\"")
 
         if len(user_messages) > max_highlights:
             lines.append("")
@@ -328,11 +327,8 @@ class MarkdownGenerator:
 
         # Create description
         if len(mappings) == 1:
-            # Use the first prompt as-is
-            description = first_prompt
-            if len(description) > 60:
-                description = description[:60] + "..."
-            return description
+            # Use the full first prompt
+            return first_prompt
         else:
             # Multiple changes
             return f"{action} functionality ({len(mappings)} changes)"
