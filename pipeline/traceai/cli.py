@@ -949,16 +949,23 @@ if [ $EXIT_CODE -eq 0 ]; then
       if ! git diff --quiet .traceai/config.json 2>/dev/null || ! git ls-files --error-unmatch .traceai/config.json >/dev/null 2>&1; then
         echo "✅ TraceAI: Uploaded to $GIST_URL"
         echo ""
-        echo "📝 Adding TraceAI config to new commit..."
+        echo "📝 Creating follow-up commit with TraceAI config..."
 
         # Add config to git
         git add .traceai/config.json
 
-        # Create a NEW commit (don't amend) so it gets pushed
+        # Create a NEW commit (don't amend)
         # Use --no-verify to prevent infinite loop
         git commit -m "chore: update TraceAI conversation artifact" --no-verify
 
-        echo "✓ Config committed and will be pushed"
+        echo "✓ Config committed"
+        echo ""
+        echo "📤 Pushing config commit in background after this push completes..."
+
+        # Schedule a background push of just the new commit after this push finishes
+        # Using nohup and & to run in background and detach from the hook
+        (sleep 2 && git push --no-verify 2>&1 | sed 's/^/   TraceAI: /' ) &
+        disown
       else
         echo "✅ TraceAI: Config already up to date"
       fi
