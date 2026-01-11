@@ -165,8 +165,13 @@ export class TraceAIDecorationProvider {
         continue;
       }
 
-      // If lines is null, it's file-level mapping - skip for decorations
+      // If lines is null, it's file-level mapping - treat as line 1
       if (mapping.lines === null) {
+        // File-level mapping - show on line 1 as a fallback
+        const existing = lineToMapping.get(1);
+        if (!existing || new Date(mapping.timestamp) > new Date(existing.timestamp)) {
+          lineToMapping.set(1, mapping);
+        }
         continue;
       }
 

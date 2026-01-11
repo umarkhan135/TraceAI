@@ -28,7 +28,7 @@ Automatically generate:
 - Structured conversation data (JSON)
 - Beautiful PR summaries (Markdown)
 - Prompt-to-code mappings
-- Stored as GitHub Gists
+- Stored locally in `.traceai/` directory
 
 ## 🚀 Quick Start
 
@@ -52,25 +52,37 @@ pip install -e .
 # 1. Work with Claude Code (as normal)
 # ... make changes ...
 
-# 2. Process the conversation
-traceai process artifact.json --repo /path/to/your/repo --pr-number 42
+# 2. Process the conversation (saves to .traceai/ automatically)
+traceai process --repo /path/to/your/repo --pr-number 42
 
-# 3. Upload to GitHub Gist
-export GITHUB_TOKEN=ghp_your_token_here
-traceai upload artifact.json
+# Creates:
+# - .traceai/42.json (machine-readable artifact)
+# - .traceai/42.md (human-readable summary)
+# - .traceai/config.json (artifact tracking)
 
-# 4. Generate PR summary
-traceai pr-summary artifact.json --output pr-summary.md
+# 3. (Optional) Generate PR summary
+traceai pr-summary --repo .
 
-# 5. Add to your PR description
-cat pr-summary.md  # Copy this into your PR
+# 4. Commit artifacts to git
+git add .traceai/
+git commit -m "Add TraceAI conversation artifacts"
 ```
 
 ### One-Command Pipeline
 
 ```bash
 traceai pipeline --repo . --pr-number 42
-# This runs: process → upload → generate PR summary
+# This runs: process → generate PR summary
+```
+
+### Automatic Git Hooks (Recommended)
+
+```bash
+# Install git hooks for automatic artifact creation
+traceai install-hook
+
+# Now artifacts are automatically created and committed on push!
+# No manual steps needed - just code with Claude and push
 ```
 
 ## 📦 What's Inside
@@ -81,9 +93,9 @@ traceai/
 │   ├── traceai/
 │   │   ├── parser.py      # Parse Claude Code conversations
 │   │   ├── mapper.py      # Map prompts to code
-│   │   ├── github_client.py  # Upload to Gist
 │   │   ├── markdown_gen.py   # Generate PR summaries
-│   │   └── cli.py         # Command-line interface
+│   │   ├── cli.py         # Command-line interface
+│   │   └── models.py      # Data models
 │   └── tests/
 │
 ├── extension/             # VSCode extension (TODO)
@@ -154,9 +166,9 @@ This PR was developed in collaboration with Claude Code.
 Claude Code Session
     ↓ (conversation.jsonl)
 Python Pipeline
-    ↓ (process + map + upload)
-GitHub Gist (JSON artifact) + PR (Markdown summary)
-    ↓ (GitHub API)
+    ↓ (process + map + save locally)
+.traceai/{id}.json + .md (committed to git)
+    ↓ (local file system)
 VSCode Extension (hover to view provenance)
 ```
 
@@ -166,35 +178,35 @@ VSCode Extension (hover to view provenance)
 2. **Parse**: Extract messages, tool calls, timestamps
 3. **Map**: Match prompts to code using tool calls + git blame
 4. **Artifact**: Generate structured JSON with full context
-5. **Upload**: Store in GitHub Gist (permanent, versioned)
-6. **Display**: Markdown summary for PR, hover UI in VSCode
+5. **Save**: Store in `.traceai/` directory (both JSON and Markdown)
+6. **Commit**: Artifacts committed to git (automatic via hooks or manual)
+7. **Display**: Markdown summary for PR, hover UI in VSCode (reads local files)
 
 ## 📋 Commands
 
 | Command | Description |
 |---------|-------------|
 | `traceai list-conversations` | List all Claude Code sessions |
-| `traceai process` | Process conversation → artifact.json |
-| `traceai upload` | Upload artifact → GitHub Gist |
+| `traceai process` | Process conversation → save to `.traceai/` |
+| `traceai quick-process` | Auto-find and process latest conversation |
 | `traceai pr-summary` | Generate PR markdown |
 | `traceai pipeline` | Run full workflow |
 | `traceai validate` | Validate artifact schema |
+| `traceai install-hook` | Install git hooks for auto-artifacts |
 
 See [pipeline/README.md](pipeline/README.md) for detailed command docs.
 
 ## 🔑 Setup
 
-### GitHub Token
+### No Setup Required!
 
-Create a token at https://github.com/settings/tokens with `gist` scope:
+TraceAI works with Claude Code out of the box:
+- ✅ No GitHub token needed
+- ✅ No external dependencies
+- ✅ Works completely offline
+- ✅ Automatically finds conversations in `~/.claude/`
 
-```bash
-export GITHUB_TOKEN=ghp_your_token_here
-```
-
-### Claude Code
-
-TraceAI works with Claude Code out of the box. No configuration needed - it automatically finds conversations in `~/.claude/`.
+Just install and run!
 
 ## 🎯 Current Status
 
@@ -203,11 +215,13 @@ TraceAI works with Claude Code out of the box. No configuration needed - it auto
 | **Python Pipeline** | ✅ Complete | All features working |
 | **Conversation Parser** | ✅ Complete | Supports Claude Code JSONL format |
 | **Prompt-to-Code Mapping** | ✅ Complete | Tool call parsing + git blame |
-| **GitHub Gist Upload** | ✅ Complete | Creates/updates Gists |
+| **Local File Storage** | ✅ Complete | Saves to `.traceai/` directory |
 | **PR Markdown Generator** | ✅ Complete | Beautiful summaries |
 | **CLI Interface** | ✅ Complete | Full-featured commands |
-| **VSCode Extension** | 📋 Planned | Next priority |
-| **AI Summarization** | 📋 Stretch | Optional enhancement |
+| **Git Hooks** | ✅ Complete | Automatic artifact creation |
+| **VSCode Extension** | ✅ Complete | Loads artifacts from local files |
+| **Extension Hover UI** | 🧪 Testing | In end-to-end testing phase |
+| **AI Summarization** | 📋 Planned | Optional enhancement |
 
 ## 🧪 Testing
 
@@ -249,19 +263,22 @@ mypy traceai/
 
 ## 🎯 Roadmap
 
-### Phase 1: MVP (Current - Hackathon)
+### Phase 1: MVP (Complete - Hackathon)
 - [x] Python pipeline
 - [x] Conversation parsing
 - [x] Prompt-to-code mapping
-- [x] GitHub Gist storage
+- [x] Local file storage (`.traceai/`)
 - [x] PR markdown generation
-- [ ] VSCode extension (basic hover)
+- [x] Git hooks for automatic artifacts
+- [x] VSCode extension (local file loading)
+- [ ] End-to-end testing
 
 ### Phase 2: Enhanced (Post-Hackathon)
-- [ ] VSCode extension (full features)
+- [ ] Hover UI end-to-end testing
 - [ ] Line-level mapping refinement
 - [ ] AI-powered summarization
-- [ ] GitHub Actions automation
+- [ ] Artifact compression (gzip)
+- [ ] Secret detection and redaction
 - [ ] Gutter icons showing AI-generated code
 
 ### Phase 3: Production (Future)

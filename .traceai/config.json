@@ -1,7 +1,12 @@
 {
   "gist_id": "233768c3327f6c348f04a11a09d202fa",
   "gist_url": "https://gist.github.com/DylanG5/233768c3327f6c348f04a11a09d202fa",
-  "branch": "hooks-and-summary",
-  "last_updated": "2026-01-10T21:59:33.573687",
-  "session_id": "unknown"
+  "branch": "new-artifact-plan",
+  "last_updated": "2026-01-10T23:58:55.480921",
+  "session_id": "unknown",
+  "artifact_files": [
+    "999.json",
+    "unknown.json"
+  ],
+  "pr_number": null
 }

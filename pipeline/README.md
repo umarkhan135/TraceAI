@@ -1,6 +1,6 @@
 # TraceAI Pipeline
 
-Python pipeline for processing Claude Code conversations and generating PR artifacts.
+Python pipeline for processing Claude Code conversations and generating local artifacts.
 
 ## Installation
 
@@ -16,49 +16,48 @@ pip install -e .
 ### 1. Process a Conversation
 
 ```bash
-# Process the most recent conversation
-traceai process artifact.json --repo /path/to/your/repo
+# Process and save to .traceai/ (automatic)
+traceai process --repo /path/to/your/repo --pr-number 42
 
-# Process specific session
-traceai process artifact.json --repo . --session-id abc123... --pr-number 42
+# Quick process (auto-finds latest conversation)
+traceai quick-process --repo .
+
+# This creates:
+# - .traceai/42.json (machine-readable artifact)
+# - .traceai/42.md (human-readable summary)
+# - .traceai/config.json (artifact tracking)
 ```
 
-### 2. Upload to GitHub Gist
+### 2. Generate PR Summary
 
 ```bash
-# Set GitHub token
-export GITHUB_TOKEN=ghp_your_token_here
+# Generate markdown for PR description
+traceai pr-summary --repo .
 
-# Upload (creates secret Gist by default)
-traceai upload artifact.json
-
-# Create public Gist
-traceai upload artifact.json --public
+# Output to file
+traceai pr-summary --repo . --output pr-summary.md
 ```
 
-### 3. Generate PR Summary
-
-```bash
-# Generate markdown for PR
-traceai pr-summary artifact.json --output pr-summary.md
-
-# Compact version
-traceai pr-summary artifact.json --compact
-
-# Full report with timeline
-traceai pr-summary artifact.json --timeline
-```
-
-### Full Pipeline (All-in-One)
+### 3. Full Pipeline (All-in-One)
 
 ```bash
 # Run complete pipeline
-traceai pipeline --repo . --pr-number 42 --output-dir ./output
+traceai pipeline --repo . --pr-number 42
 
 # This will:
 # 1. Process the conversation
-# 2. Upload to Gist
+# 2. Save artifacts to .traceai/
 # 3. Generate PR summary
+```
+
+### 4. Install Git Hooks (Recommended)
+
+```bash
+# Install automatic artifact creation on push
+traceai install-hook
+
+# Now artifacts are created automatically!
+# Just code with Claude and push - no manual steps needed
 ```
 
 ## Commands
@@ -73,30 +72,29 @@ traceai list-conversations --repo /path/to/repo
 
 ### `traceai process`
 
-Process a conversation and generate artifact JSON.
+Process a conversation and save artifacts to `.traceai/`.
 
 ```bash
-traceai process OUTPUT_FILE [OPTIONS]
+traceai process [OPTIONS]
 
 Options:
   --repo PATH              Path to git repository (default: current directory)
   --session-id ID          Specific session to process (default: most recent)
   --pr-number NUM          PR number to associate
   --branch NAME            Branch name (default: auto-detect)
+  --output-dir DIR         Output directory (default: .traceai)
   --no-git-correlation     Skip git blame correlation
 ```
 
-### `traceai upload`
+### `traceai quick-process`
 
-Upload artifact to GitHub Gist.
+Auto-find latest conversation and process it.
 
 ```bash
-traceai upload ARTIFACT_FILE [OPTIONS]
+traceai quick-process [OPTIONS]
 
 Options:
-  --token TOKEN    GitHub token (default: GITHUB_TOKEN env var)
-  --public         Create public Gist (default: secret)
-  --update ID      Update existing Gist
+  --repo PATH              Path to git repository (default: current directory)
 ```
 
 ### `traceai pr-summary`
@@ -104,28 +102,37 @@ Options:
 Generate PR summary markdown.
 
 ```bash
-traceai pr-summary ARTIFACT_FILE [OPTIONS]
+traceai pr-summary [OPTIONS]
 
 Options:
-  --output FILE    Output file (default: print to stdout)
-  --compact        Generate compact one-paragraph summary
-  --timeline       Include full timeline view
+  --repo PATH          Repository path
+  --output FILE        Output file (default: print to stdout)
 ```
 
 ### `traceai pipeline`
 
-Run full pipeline (process + upload + PR summary).
+Run full pipeline (process + PR summary).
 
 ```bash
 traceai pipeline [OPTIONS]
 
 Options:
   --repo PATH          Repository path
-  --session-id ID      Session to process
   --pr-number NUM      PR number (required)
-  --token TOKEN        GitHub token
-  --public             Create public Gist
-  --output-dir DIR     Output directory (default: ./traceai-output)
+  --output-dir DIR     Output directory (default: .traceai)
+```
+
+### `traceai install-hook`
+
+Install git hooks for automatic artifact creation.
+
+```bash
+traceai install-hook
+
+# Installs pre-push hook that:
+# - Detects Claude Code conversations
+# - Processes them automatically
+# - Commits artifacts to .traceai/
 ```
 
 ### `traceai validate`
@@ -136,44 +143,44 @@ Validate artifact JSON schema.
 traceai validate ARTIFACT_FILE
 ```
 
-## GitHub Token Setup
-
-Create a GitHub personal access token:
-
-1. Go to https://github.com/settings/tokens
-2. Click "Generate new token (classic)"
-3. Select scope: `gist`
-4. Copy token and set environment variable:
-
-```bash
-export GITHUB_TOKEN=ghp_your_token_here
-```
-
-Or pass directly to commands:
-
-```bash
-traceai upload artifact.json --token ghp_your_token_here
-```
-
 ## Example Workflow
+
+### Manual Workflow
 
 ```bash
 # 1. Work with Claude Code (as normal)
 # ... make changes ...
 
-# 2. Create PR
+# 2. Process conversation
+traceai process --repo . --pr-number 123
+
+# 3. Commit artifacts
+git add .traceai/
+git commit -m "Add TraceAI artifacts"
+git push
+
+# 4. Create PR with summary
+traceai pr-summary --repo . > pr-summary.md
+gh pr create --title "Add feature" --body-file pr-summary.md
+```
+
+### Automatic Workflow (with Git Hooks)
+
+```bash
+# 1. Install hooks (one-time setup)
+traceai install-hook
+
+# 2. Work with Claude Code (as normal)
+# ... make changes ...
+
+# 3. Commit and push
+git add .
+git commit -m "Add feature"
+git push  # Artifacts automatically created and committed!
+
+# 4. Create PR
 gh pr create --title "Add feature"
-
-# 3. Run TraceAI pipeline
-traceai pipeline --pr-number 123 --repo .
-
-# 4. Copy PR summary
-cat traceai-output/pr-summary.md | pbcopy  # macOS
-# or
-cat traceai-output/pr-summary.md | xclip   # Linux
-
-# 5. Update PR description
-gh pr edit 123 --body-file traceai-output/pr-summary.md
+# Artifacts are already in .traceai/ and committed
 ```
 
 ## Development
@@ -195,7 +202,18 @@ mypy traceai/
 
 ## Output Files
 
-### artifact.json
+### .traceai/ Directory Structure
+
+```
+.traceai/
+├── config.json           # Lists all artifacts and metadata
+├── 42.json              # Machine-readable artifact (PR #42)
+├── 42.md                # Human-readable summary (PR #42)
+├── abc123.json          # Session-based artifact
+└── abc123.md
+```
+
+### artifact.json Format
 
 Complete conversation artifact with:
 - Full conversation history
@@ -203,13 +221,13 @@ Complete conversation artifact with:
 - Metadata (session, PR, repo info)
 - Statistics
 
-### pr-summary.md
+### *.md Format
 
-Markdown summary for PR description with:
+Markdown summary with:
 - Overview and stats
 - Files modified
 - Conversation highlights
-- Link to full conversation (Gist)
+- Link to full conversation (local `.md` file)
 
 ## Troubleshooting
 
@@ -217,13 +235,13 @@ Markdown summary for PR description with:
 
 - Ensure you're in a git repository
 - Check that Claude Code has been used in this repo
-- Verify path: `~/.claude/projects/-path-to-your-repo/`
+- Verify path: `~/.claude/projects/<path-to-your-repo>/`
 
-### "GitHub token required"
+### "Artifacts not loading in VSCode"
 
-- Set `GITHUB_TOKEN` environment variable
-- Or pass `--token` to upload command
-- Token needs `gist` scope
+- Check `.traceai/config.json` exists and is valid JSON
+- Ensure artifacts are committed to git
+- Try "TraceAI: Refresh Cache" command in VSCode
 
 ### "Failed to extract line numbers"
 
@@ -240,14 +258,23 @@ conversation.jsonl (Claude Code)
     ↓
 [Mapper] - Map prompts to code changes
     ↓
-artifact.json
+[Local Writer] - Save to .traceai/
     ↓
-[GitHub Client] - Upload to Gist
+.traceai/42.json + .traceai/42.md
     ↓
-[Markdown Generator] - Create PR summary
+[Git Commit] - Committed to version control
     ↓
-pr-summary.md
+[VSCode Extension] - Reads local files
 ```
+
+## Benefits of Local Storage
+
+✅ **No setup required** - No GitHub token, no API configuration
+✅ **Works offline** - Everything is local
+✅ **Fast** - Direct file I/O, no network calls
+✅ **Transparent** - Artifacts visible in repo
+✅ **Version controlled** - Full history in git
+✅ **Portable** - Syncs via git push/pull
 
 ## License
 

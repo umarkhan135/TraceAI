@@ -406,7 +406,7 @@ def process(
 
         # Generate and save Markdown summary
         md_generator = markdown_gen.MarkdownGenerator(artifact)
-        md_content = md_generator.generate_full_summary()
+        md_content = md_generator.generate_pr_summary()
         with open(md_path, 'w') as f:
             f.write(md_content)
         console.print(f"[green]✓[/green] Saved Markdown to {md_path}")
@@ -663,7 +663,7 @@ def quick_process(repo: str, no_summary: bool):
 
         # Generate and save Markdown summary
         md_generator = markdown_gen.MarkdownGenerator(artifact)
-        md_content = md_generator.generate_full_summary()
+        md_content = md_generator.generate_pr_summary()
         with open(md_path, 'w') as f:
             f.write(md_content)
 

@@ -118,15 +118,19 @@ export class UnifiedLoader {
       // Add mappings with PR prefix if available
       const prefix = artifact.metadata.pr_number ? `[PR #${artifact.metadata.pr_number}] ` : '';
 
+      // Calculate index offset for this artifact (based on current merged conversation length)
+      const indexOffset = merged.conversation.length;
+
+      // Add mappings with updated prompt_index to match offset conversations
       for (const mapping of artifact.mappings) {
         merged.mappings.push({
           ...mapping,
+          prompt_index: mapping.prompt_index + indexOffset,  // ✅ Update prompt_index!
           prompt_preview: prefix + mapping.prompt_preview
         });
       }
 
       // Merge conversations (offset indices)
-      const indexOffset = merged.conversation.length;
       for (const msg of artifact.conversation) {
         merged.conversation.push({
           ...msg,

@@ -18,11 +18,6 @@
     "configuration": {
       "title": "TraceAI",
       "properties": {
-        "traceai.githubToken": {
-          "type": "string",
-          "default": "",
-          "description": "GitHub personal access token for fetching Gist data"
-        },
         "traceai.enableHover": {
           "type": "boolean",
           "default": true,
@@ -33,10 +28,10 @@
           "default": true,
           "description": "Show inline annotations (GitLens-style) at the end of AI-generated lines"
         },
-        "traceai.cacheExpiration": {
-          "type": "number",
-          "default": 3600,
-          "description": "Cache expiration time in seconds"
+        "traceai.artifactDirectory": {
+          "type": "string",
+          "default": ".traceai",
+          "description": "Directory containing TraceAI artifacts"
         },
         "traceai.showGutterIcons": {
           "type": "boolean",

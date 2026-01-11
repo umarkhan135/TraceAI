@@ -194,6 +194,9 @@ class MarkdownGenerator:
             lines.append("*No conversation available*")
             return "\n".join(lines)
 
+        # Filter user messages
+        user_messages = [msg for msg in self.artifact.conversation if msg.role == "user"]
+
         # Select most important prompts (first, last, and middle ones)
         highlights = []
 

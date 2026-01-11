@@ -12,7 +12,7 @@
 
 **Solution**:
 1. **Capture** Claude Code conversations and map prompts to specific code changes
-2. **Store** conversations as permanent GitHub Gist artifacts linked to PRs
+2. **Store** conversations as local artifacts (`.traceai/` directory) committed to git
 3. **Display** prompt provenance via VSCode extension (hover over code → see the prompt that generated it)
 
 ---
@@ -21,18 +21,18 @@
 
 ```
 Claude Code Session
-    ↓ (conversation.json)
-Python Pipeline (parse → map → upload)
+    ↓ (conversation.jsonl)
+Python Pipeline (parse → map → save locally)
     ↓
-GitHub Gist (JSON artifact) + PR (Markdown summary)
-    ↓ (GitHub API)
+.traceai/{id}.json + .md (committed to git)
+    ↓ (local file system)
 VSCode Extension (hover UI showing prompt + link)
 ```
 
 ### Tech Stack
-- **VSCode Extension**: TypeScript, VSCode API, Octokit
-- **Processing Pipeline**: Python 3.11+, gitpython, PyGithub, anthropic (optional)
-- **Storage**: GitHub Gist (JSON for machines, Markdown for humans)
+- **VSCode Extension**: TypeScript, VSCode API, local file system
+- **Processing Pipeline**: Python 3.11+, gitpython, anthropic (optional)
+- **Storage**: Local file system (`.traceai/` directory - JSON for machines, Markdown for humans)
 - **Mapping Strategy**: Parse Claude Code tool calls (Edit/Write) + git blame timestamps
 
 ---
@@ -58,10 +58,9 @@ traceai/
 │   │   ├── cli.py               # Main CLI entry (traceai command)
 │   │   ├── parser.py            # Parse Claude Code conversations
 │   │   ├── mapper.py            # Map prompts → code (tool calls + git blame)
-│   │   ├── github_client.py     # Upload to Gist, create PR summaries
 │   │   ├── markdown_gen.py      # Generate beautiful PR markdown
 │   │   ├── summarizer.py        # (Stretch) Claude API for summarization
-│   │   └── models.py            # Data models (Pydantic or dataclasses)
+│   │   └── models.py            # Data models (Pydantic)
 │   ├── tests/
 │   ├── requirements.txt
 │   ├── setup.py
@@ -88,20 +87,31 @@ traceai/
 
 ## 🔑 Key Technical Decisions
 
-### 1. **Conversation Storage: GitHub Gist**
+### 1. **Conversation Storage: Local File System**
 **Why**:
-- Zero infrastructure needed
-- Permanent URLs
-- Native GitHub integration
-- Can be public or secret
-- Supports both JSON (machine-readable) and HTML (human-readable)
+- Zero external dependencies
+- Works offline
+- Fast (direct file access)
+- Version controlled alongside code
+- No setup required (no GitHub token)
+- Full provenance in git history
 
 **Tradeoffs**:
-- Not designed for high volume (hacky)
-- Rate limits on API
-- Can't easily query across multiple conversations
+- Artifacts committed to repo (adds 50-500KB per conversation)
+- Can use `.gitignore` if desired
+- Requires git push/pull for syncing across machines
 
-**Future**: Move to dedicated backend (PostgreSQL + S3) for production
+**Future**: Option to compress artifacts or archive to separate branch
+
+**Storage Structure**:
+```
+.traceai/
+├── config.json           # Lists all artifacts
+├── 42.json              # Machine-readable artifact (PR #42)
+├── 42.md                # Human-readable summary (PR #42)
+├── abc123.json          # Another artifact (session ID)
+└── abc123.md
+```
 
 ### 2. **Prompt-to-Code Mapping: Tool Call Parsing**
 **Primary Strategy**: Parse Claude Code's tool use blocks
@@ -117,18 +127,21 @@ traceai/
 **MVP Scope**: File-level mapping (which prompts touched which files)
 **Stretch**: Line-level mapping (which prompt generated which specific lines)
 
-### 3. **VSCode Extension Data Access: GitHub API**
+### 3. **VSCode Extension Data Access: Local File System**
 **Why**:
-- Always up-to-date
-- No need to commit metadata to repo
-- Works across machines
+- No internet connection required
+- No GitHub token needed
+- Fast (direct file access)
+- Works offline
+- Simpler architecture
 
-**Tradeoffs**:
-- Requires internet connection
-- Rate limits
-- Need GitHub token
+**How it works**:
+- Extension reads `.traceai/config.json` to discover artifacts
+- Loads artifact JSON files directly from disk
+- Watches `config.json` for changes (auto-reloads)
+- Supports multiple artifacts with automatic merging
 
-**Mitigation**: Aggressive caching in workspace `.vscode/` directory
+**Caching**: In-memory cache with file watcher invalidation
 
 ---
 
@@ -145,8 +158,7 @@ traceai/
     "repo": "username/repo-name",
     "branch": "feature/auth",
     "created_at": "2026-01-10T15:30:00Z",
-    "claude_code_version": "1.0.0",
-    "gist_url": "https://gist.github.com/abc123"
+    "claude_code_version": "1.0.0"
   },
   "mappings": [
     {
@@ -200,7 +212,7 @@ traceai/
 ```markdown
 ## 🤖 AI-Generated Code Summary
 
-This PR was developed in collaboration with Claude Code. [View full conversation →](https://gist.github.com/...)
+This PR was developed in collaboration with Claude Code. [View full conversation →](.traceai/42.md)
 
 ### 📊 Stats
 - **AI-Generated Lines**: 127
@@ -226,7 +238,7 @@ This PR was developed in collaboration with Claude Code. [View full conversation
 All changes include unit tests. Run `npm test` to verify.
 
 ---
-*Generated by [TraceAI](https://github.com/yourteam/traceai) • [View in VSCode](vscode://extension/traceai) • [Full Conversation](https://gist.github.com/...)*
+*Generated by [TraceAI](https://github.com/yourteam/traceai) • [View in VSCode](vscode://extension/traceai) • [Full Conversation](.traceai/42.md)*
 ```
 
 ---
@@ -243,52 +255,63 @@ All changes include unit tests. Run `npm test` to verify.
 
 2. **Process conversation** (after session, before PR)
    ```bash
-   # Parse conversation and generate artifacts
-   python -m traceai.cli process \
-     --conversation ~/.claude/conversations/latest.json \
-     --repo . \
-     --output artifacts/
+   # Parse conversation and save artifacts locally to .traceai/
+   traceai process --repo . --pr-number 42
+
+   # Creates:
+   # - .traceai/42.json (machine-readable artifact)
+   # - .traceai/42.md (human-readable summary)
+   # - .traceai/config.json (updated with artifact reference)
    ```
 
-3. **Upload to GitHub** (create Gist + generate PR text)
+3. **Generate PR summary** (optional - for PR description)
    ```bash
-   # Upload artifact to Gist and generate PR summary
-   python -m traceai.cli upload \
-     --artifact artifacts/conversation.json \
-     --token $GITHUB_TOKEN
+   # Generate PR markdown summary
+   traceai pr-summary --repo .
 
-   # Outputs:
-   # - Gist URL: https://gist.github.com/abc123
-   # - PR markdown: artifacts/pr-summary.md
+   # Outputs PR summary to stdout (can redirect to file)
    ```
 
-4. **Create PR** (paste generated markdown)
+4. **Commit artifacts** (commit to version control)
+   ```bash
+   # Artifacts are automatically staged by git hooks, or manually:
+   git add .traceai/
+   git commit -m "Add conversation artifacts"
+   ```
+
+5. **Create PR** (paste generated markdown)
    ```bash
    # Create PR with generated summary
-   gh pr create --body-file artifacts/pr-summary.md
+   gh pr create --body-file pr-summary.md
    ```
 
-5. **Review in VSCode** (extension auto-activates)
+6. **Review in VSCode** (extension auto-activates)
    - Hover over code → see prompt
-   - Click link → view full conversation
+   - Click link → opens `.traceai/42.md` in editor
 
 ### CLI Commands
 
 ```bash
-# Process conversation
-traceai process <conversation-file> [--repo PATH] [--output DIR]
+# Process conversation and save to .traceai/
+traceai process --repo PATH [--pr-number NUM] [--output-dir .traceai]
 
-# Upload to Gist
-traceai upload <artifact-file> --token TOKEN [--secret]
+# Quick process (auto-find latest conversation)
+traceai quick-process --repo PATH
 
 # Generate PR summary
-traceai pr-summary <artifact-file> [--output FILE]
+traceai pr-summary --repo PATH [--output FILE]
 
-# Full pipeline (process + upload + PR)
-traceai pipeline <conversation-file> --token TOKEN --pr-number NUM
+# Full pipeline (process → PR summary)
+traceai pipeline --repo PATH --pr-number NUM
 
 # Validate artifact schema
 traceai validate <artifact-file>
+
+# Install git hooks for automatic artifact creation
+traceai install-hook
+
+# List available conversations
+traceai list-conversations
 ```
 
 ---
@@ -335,15 +358,15 @@ async provideHover(document, position) {
   const file = document.fileName;
   const line = position.line;
 
-  // 2. Get git info (repo, branch, commit)
-  const gitInfo = await getGitInfo(file);
+  // 2. Get workspace path
+  const workspacePath = workspace.getWorkspaceFolder(document.uri)?.uri.fsPath;
+  if (!workspacePath) return null;
 
-  // 3. Find associated Gist (check cache first)
-  const gist = await findGistForFile(gitInfo);
-  if (!gist) return null;
+  // 3. Load artifact from .traceai/ (uses cache + file watcher)
+  const artifact = await unifiedLoader.loadArtifact(workspacePath);
+  if (!artifact) return null;
 
-  // 4. Parse artifact and find mapping
-  const artifact = JSON.parse(gist.content);
+  // 4. Find mapping for this file/line
   const mapping = artifact.mappings.find(m =>
     m.file === file &&
     line >= m.lines[0] &&
@@ -355,15 +378,17 @@ async provideHover(document, position) {
   // 5. Get full prompt from conversation
   const prompt = artifact.conversation[mapping.prompt_index];
 
-  // 6. Build hover markdown
+  // 6. Build hover markdown with local link
+  const mdFile = `.traceai/${artifact.metadata.pr_number || 'session'}.md`;
+
   return new Hover(`
     🤖 **AI-Generated Code**
 
     **Prompt**: ${mapping.prompt_preview}
     **Time**: ${formatTime(mapping.timestamp)}
-    **PR**: #${artifact.metadata.pr_number}
+    **PR**: #${artifact.metadata.pr_number || 'N/A'}
 
-    [View Full Conversation](${artifact.metadata.gist_url})
+    [View Full Conversation](${mdFile})
   `);
 }
 ```
@@ -372,11 +397,10 @@ async provideHover(document, position) {
 
 ```json
 {
-  "traceai.githubToken": "",
   "traceai.enableHover": true,
-  "traceai.cacheExpiration": 3600,
   "traceai.showGutterIcons": false,
-  "traceai.showFileStats": true
+  "traceai.showFileStats": true,
+  "traceai.artifactDirectory": ".traceai"
 }
 ```
 
@@ -419,28 +443,32 @@ Create realistic test data:
 - Deleted or moved files (mapping breaks)
 
 ### Security Considerations
-- **Secrets in conversations**: Regex-based detection and redaction
-- **Private repos**: Use secret Gists, respect GitHub permissions
-- **Token security**: Never commit tokens, use env vars or secure storage
+- **Secrets in conversations**: Regex-based detection and redaction (future enhancement)
+- **Private repos**: Artifacts committed to repo - ensure `.traceai/` respects repo permissions
+- **Sensitive data**: Consider adding `.traceai/` to `.gitignore` for sensitive projects
+- **Token security**: No GitHub token required (removed dependency)
 
 ---
 
 ## 📊 Success Metrics
 
 ### MVP (Must Have)
-- [ ] Pipeline successfully parses Claude Code conversation
-- [ ] Generates valid JSON artifact with at least file-level mappings
-- [ ] Uploads artifact to GitHub Gist
-- [ ] Extension installs and activates in VSCode
-- [ ] Hovering over AI-generated code shows prompt + link
+- [x] Pipeline successfully parses Claude Code conversation
+- [x] Generates valid JSON artifact with at least file-level mappings
+- [x] Saves artifacts to `.traceai/` directory (both JSON and MD)
+- [x] Extension installs and activates in VSCode
+- [x] Extension loads artifacts from local file system
+- [ ] Hovering over AI-generated code shows prompt + link (in testing)
 - [ ] End-to-end demo works (code → process → PR → hover)
 
 ### Stretch Goals
 - [ ] Line-level mapping (not just file-level)
 - [ ] AI-powered conversation summarization
-- [ ] GitHub Actions automation
+- [ ] Git hooks for automatic artifact creation (pre-push)
 - [ ] Gutter icons showing AI-generated code
 - [ ] Sidebar panel with full conversation view
+- [ ] Artifact compression (gzip can reduce by 70-80%)
+- [ ] Secret detection and redaction
 
 ---
 
@@ -509,10 +537,10 @@ python -m traceai.cli validate artifact.json
 - **Hover inspection**: Hover over code, check DevTools console for errors
 
 ### Common Issues
-1. **"No conversation found"**: Check conversation file path, format
-2. **"GitHub API rate limit"**: Use authenticated requests (5000/hr vs 60/hr)
-3. **"Gist not found"**: Check token permissions, cache invalidation
-4. **"Hover not showing"**: Verify file is in git repo, artifact exists
+1. **"No conversation found"**: Check conversation file path, format, ensure Claude Code session exists
+2. **"Artifact not loading in extension"**: Check `.traceai/config.json` exists and is valid JSON
+3. **"Hover not showing"**: Verify file is in git repo, artifact exists in `.traceai/`, extension is activated
+4. **"Config.json not updating"**: Clear extension cache using "TraceAI: Refresh Cache" command
 
 ---
 
@@ -597,15 +625,24 @@ When working on this project:
 ## 🔄 Version History
 
 **v1.0** (2026-01-10) - Initial hackathon version
-- Core pipeline: parse → map → upload
+- Core pipeline: parse → map → save locally
 - VSCode extension: hover provider
-- GitHub Gist storage
+- Local file system storage (`.traceai/` directory)
 - File-level mapping
+- Git hooks for automatic artifact creation
 
-**Future versions** (post-hackathon):
-- v1.1: Line-level mapping, AI summarization
-- v1.2: GitHub Actions integration
-- v2.0: Standalone conversation registry
+**v1.1** (2026-01-10) - Local-first migration
+- Migrated from GitHub Gist to local file storage
+- Removed all GitHub API dependencies
+- Removed GitHub token requirement
+- Simplified architecture (~850 lines of code removed)
+- Added `.traceai/config.json` for artifact tracking
+- Extension now reads from local files
+
+**Future versions**:
+- v1.2: Line-level mapping, AI summarization
+- v1.3: Artifact compression, secret detection
+- v2.0: Multi-repository artifact registry
 - v3.0: Multi-tool support (Cursor, Copilot, etc.)
 
 ---
