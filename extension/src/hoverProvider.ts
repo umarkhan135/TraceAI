@@ -71,13 +71,19 @@ export class TraceAIHoverProvider implements vscode.HoverProvider {
     // -----------------------------------------------------------------------
     // STEP 1.5: Check if hovering over a decoration (GitLens-style behavior)
     // -----------------------------------------------------------------------
-    // If decoration provider is set, only show hover when on the decoration
+    // ONLY show hover when hovering on the decoration, not on code
     if (this.decorationProvider) {
       const decorationInfo = this.decorationProvider.isPositionOnDecoration(document, position);
 
       if (decorationInfo) {
         // User is hovering over the decoration - show the tooltip from decoration data
-        const prompt = decorationInfo.artifact.conversation[decorationInfo.mapping.prompt_index];
+        const promptIndex = decorationInfo.mapping.prompt_index;
+        console.log(`TraceAI: Looking for prompt at index ${promptIndex}`);
+
+        // Find the conversation message by its index field, not array position
+        const prompt = decorationInfo.artifact.conversation.find(msg => msg.index === promptIndex);
+        console.log(`TraceAI: Found prompt:`, prompt);
+
         if (prompt) {
           const hoverContent = this.buildHoverContent(
             decorationInfo.mapping,
@@ -85,11 +91,13 @@ export class TraceAIHoverProvider implements vscode.HoverProvider {
             decorationInfo.artifact
           );
           return new vscode.Hover(hoverContent);
+        } else {
+          console.log(`TraceAI: No prompt found at index ${promptIndex}`);
         }
-      } else {
-        // User is hovering over code (not decoration) - don't show tooltip
-        return null;
       }
+
+      // If not hovering over decoration, don't show hover
+      return null;
     }
 
     // -----------------------------------------------------------------------
@@ -135,8 +143,8 @@ export class TraceAIHoverProvider implements vscode.HoverProvider {
     // -----------------------------------------------------------------------
     // STEP 6: Get the full prompt from the conversation
     // -----------------------------------------------------------------------
-    // The mapping tells us which prompt (by index) generated this code
-    const prompt = artifact.conversation[mapping.prompt_index];
+    // The mapping tells us which prompt (by index field) generated this code
+    const prompt = artifact.conversation.find(msg => msg.index === mapping.prompt_index);
     if (!prompt) {
       return null;  // Prompt not found (shouldn't happen normally)
     }
@@ -265,18 +273,11 @@ export class TraceAIHoverProvider implements vscode.HoverProvider {
     md.appendMarkdown('### 🤖 AI-Generated Code\n\n');
 
     // =====================================================================
-    // PROMPT PREVIEW (short version from mapping)
-    // =====================================================================
-    // This is the short description stored in the mapping
-    md.appendMarkdown('**Prompt:**\n');
-    md.appendMarkdown(`> ${this.truncate(mapping.prompt_preview, 200)}\n\n`);
-
-    // =====================================================================
     // FULL PROMPT (from conversation)
     // =====================================================================
-    // This is the complete prompt the user typed
-    md.appendMarkdown('**Full Request:**\n');
-    md.appendMarkdown(`> ${this.truncate(prompt.content, 300)}\n\n`);
+    // This is the complete prompt the user typed - show it in full
+    md.appendMarkdown('**Prompt:**\n');
+    md.appendMarkdown(`> ${prompt.content}\n\n`);
 
     // =====================================================================
     // METADATA SECTION
