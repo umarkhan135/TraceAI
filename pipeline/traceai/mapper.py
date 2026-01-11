@@ -59,6 +59,13 @@ def extract_code_mappings(
         prompt = extract_text_from_message(user_message.get('message', {}).get('content', ''))
         prompt_timestamp = user_message.get('timestamp')
 
+        # Find the user message's index in the messages list
+        user_message_index = None
+        for idx, msg in enumerate(messages):
+            if msg is user_message:
+                user_message_index = idx
+                break
+
         # Process each tool call
         for tool_call in tool_calls:
             tool_name = tool_call.get('name')
@@ -80,7 +87,7 @@ def extract_code_mappings(
                     # File is outside repo, keep absolute path
                     pass
 
-            # Extract line information if available (Edit tool)
+            # Extract line information if available (Edit or Write tool)
             lines = None
             confidence = 0.9  # Default confidence
 
@@ -89,11 +96,14 @@ def extract_code_mappings(
                     tool_input,
                     repo_path / file_path if not Path(file_path).is_absolute() else Path(file_path)
                 )
+            elif tool_name == 'Write':
+                # For Write tool, calculate lines from the content
+                lines, confidence = extract_line_numbers_from_write(tool_input)
 
             mapping = {
                 'file': file_path,
                 'lines': lines,
-                'prompt_index': i,
+                'prompt_index': user_message_index if user_message_index is not None else i,
                 'prompt_preview': prompt[:100] + '...' if len(prompt) > 100 else prompt,
                 'timestamp': entry['timestamp'],
                 'tool': tool_name,
@@ -146,6 +156,37 @@ def extract_line_numbers_from_edit(
     except Exception as e:
         print(f"Warning: Could not extract line numbers from {file_path}: {e}")
         return None, 0.5
+
+
+def extract_line_numbers_from_write(
+    tool_input: Dict[str, Any]
+) -> Tuple[Optional[List[int]], float]:
+    """
+    Extract line numbers from a Write tool call.
+
+    Args:
+        tool_input: The Write tool's input dict (contains content)
+
+    Returns:
+        Tuple of ([start_line, end_line], confidence)
+        Returns (None, 0.5) if line numbers cannot be determined
+    """
+    content = tool_input.get('content', '')
+    if not content:
+        return None, 0.5
+
+    # Count the number of lines in the content
+    num_lines = content.count('\n')
+
+    # If content doesn't end with newline, add 1 to line count
+    if content and not content.endswith('\n'):
+        num_lines += 1
+
+    if num_lines == 0:
+        num_lines = 1  # At least 1 line even if empty
+
+    # Write tool creates the entire file, so lines are from 1 to num_lines
+    return [1, num_lines], 0.95
 
 
 def correlate_with_git_blame(
