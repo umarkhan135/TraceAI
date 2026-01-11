@@ -91,5 +91,8 @@ artifacts/
 .traceai/artifacts.json
 .traceai/*.jsonl
 
+# Ignore hook prompt marker (internal state tracking)
+.traceai/.hook-prompted
+
 # But DO commit config.json (created by git hooks)
 !.traceai/config.json

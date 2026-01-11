@@ -131,7 +131,8 @@ class MarkdownGenerator:
 
         lines.append(f"- **AI-Generated Lines**: ~{ai_lines}")
         lines.append(f"- **Files Modified**: {stats.files_modified}")
-        lines.append(f"- **Conversation Length**: {stats.total_prompts} prompts")
+        lines.append(
+            f"- **Conversation Length**: {stats.total_prompts} prompts")
 
         if stats.total_tokens > 0:
             lines.append(f"- **Tokens Used**: {stats.total_tokens:,}")
@@ -139,7 +140,8 @@ class MarkdownGenerator:
         # Duration
         if self.artifact.metadata.duration_seconds:
             duration_mins = self.artifact.metadata.duration_seconds / 60
-            lines.append(f"- **Development Time**: {duration_mins:.0f} minutes")
+            lines.append(
+                f"- **Development Time**: {duration_mins:.0f} minutes")
 
         return "\n".join(lines)
 
@@ -165,27 +167,22 @@ class MarkdownGenerator:
         # Create file list with descriptions
         for file_path, file_mappings in files_map.items():
             # Get the first mapping for this file
-            description = self._summarize_change(file_mappings[0], file_mappings)
+            description = self._summarize_change(
+                file_mappings[0], file_mappings)
 
             lines.append(f"- `{file_path}` - {description}")
 
         return "\n".join(lines)
 
     def _generate_highlights(self, max_highlights: int) -> str:
-        """Generate conversation highlights."""
+        """Generate conversation in alternating user/assistant format."""
         lines = [
-            "### 🔍 Conversation Highlights",
+            "### 💬 Conversation",
             ""
         ]
 
-        # Get user messages
-        user_messages = [
-            msg for msg in self.artifact.conversation
-            if msg.role == "user"
-        ]
-
-        if not user_messages:
-            lines.append("*No conversation highlights available*")
+        if not self.artifact.conversation:
+            lines.append("*No conversation available*")
             return "\n".join(lines)
 
         # Select most important prompts (first, last, and middle ones)
@@ -213,7 +210,8 @@ class MarkdownGenerator:
 
         if len(user_messages) > max_highlights:
             lines.append("")
-            lines.append(f"*... and {len(user_messages) - max_highlights} more prompts in the full conversation*")
+            lines.append(
+                f"*... and {len(user_messages) - max_highlights} more prompts in the full conversation*")
 
         return "\n".join(lines)
 
@@ -273,7 +271,8 @@ class MarkdownGenerator:
         ]
 
         if self.gist_url:
-            footer_parts.append(f"[View in VSCode](vscode://extension/traceai)")
+            footer_parts.append(
+                f"[View in VSCode](vscode://extension/traceai)")
             footer_parts.append(f"[Full Conversation]({self.gist_url})")
 
         lines.append(" • ".join(footer_parts))
@@ -347,7 +346,8 @@ class MarkdownGenerator:
 
         # Subject line (first user prompt, truncated)
         first_prompt = next(
-            (msg.content for msg in self.artifact.conversation if msg.role == "user" and msg.content),
+            (msg.content for msg in self.artifact.conversation if msg.role ==
+             "user" and msg.content),
             "AI-assisted changes"
         )
 
@@ -376,6 +376,7 @@ class MarkdownGenerator:
         if self.gist_url:
             lines.append(f"Conversation: {self.gist_url}")
 
-        lines.append("Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>")
+        lines.append(
+            "Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>")
 
         return "\n".join(lines)

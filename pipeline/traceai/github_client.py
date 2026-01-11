@@ -264,22 +264,21 @@ class GitHubClient:
                     md.append(f"   - Time: {mapping.timestamp}")
                     md.append("")
 
-        # Conversation highlights (first 5 user prompts)
-        md.append("## Conversation Highlights")
+        # Full conversation in alternating format
+        md.append("## 💬 Conversation")
         md.append("")
 
-        user_messages = [
-            msg for msg in artifact.conversation if msg.role == "user"]
-        for i, msg in enumerate(user_messages[:5], 1):
-            content_preview = msg.content[:100] + \
-                "..." if len(msg.content) > 100 else msg.content
-            md.append(f"{i}. **{content_preview}**")
-            md.append(f"   - Time: {msg.timestamp}")
-            md.append("")
-
-        if len(user_messages) > 5:
-            md.append(f"*... and {len(user_messages) - 5} more prompts*")
-            md.append("")
+        for msg in artifact.conversation:
+            if msg.role == "user":
+                # User prompt (plain text)
+                md.append(msg.content)
+                md.append("")
+            elif msg.role == "assistant":
+                # Assistant response (quoted with >)
+                response_lines = msg.content.split("\n")
+                for line in response_lines:
+                    md.append(f"> {line}")
+                md.append("")
 
         # Footer
         md.append("---")
