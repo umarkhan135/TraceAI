@@ -14,7 +14,7 @@ from rich.panel import Panel
 from rich.markdown import Markdown
 from rich import print as rprint
 
-from . import parser, mapper, github_client, markdown_gen, summarizer
+from . import parser, mapper, markdown_gen, summarizer
 from .models import (
     ConversationArtifact,
     ArtifactMetadata,
@@ -22,6 +22,9 @@ from .models import (
     CodeMapping,
     ConversationStats,
     ToolCall,
+    TraceAIConfig,
+    get_artifact_filename,
+    get_artifact_markdown_filename,
 )
 
 console = Console()
@@ -100,6 +103,49 @@ def mark_hook_prompted(repo_root: Path):
     marker_file.write_text(f"Prompted on {datetime.now().isoformat()}\n")
 
 
+def update_config(
+    traceai_dir: Path,
+    artifact_filename: str,
+    pr_number: Optional[int],
+    branch: Optional[str]
+):
+    """
+    Update or create .traceai/config.json with new artifact information.
+
+    Args:
+        traceai_dir: Path to .traceai directory
+        artifact_filename: Filename of the artifact (e.g., "42.json")
+        pr_number: Optional PR number
+        branch: Optional branch name
+    """
+    config_file = traceai_dir / 'config.json'
+
+    # Load existing or create new
+    if config_file.exists():
+        try:
+            with open(config_file, 'r') as f:
+                config_data = json.load(f)
+        except:
+            config_data = {'artifact_files': []}
+    else:
+        config_data = {'artifact_files': []}
+
+    # Add artifact if not already tracked
+    if artifact_filename not in config_data.get('artifact_files', []):
+        if 'artifact_files' not in config_data:
+            config_data['artifact_files'] = []
+        config_data['artifact_files'].append(artifact_filename)
+
+    # Update metadata
+    config_data['pr_number'] = pr_number
+    config_data['branch'] = branch
+    config_data['last_updated'] = datetime.now().isoformat()
+
+    # Save
+    with open(config_file, 'w') as f:
+        json.dump(config_data, f, indent=2)
+
+
 def auto_setup_hook_check():
     """
     Automatically check if hooks should be installed and prompt user.
@@ -121,7 +167,7 @@ def auto_setup_hook_check():
     console.print()
     console.print("[bold cyan]💡 TraceAI Git Hook Setup[/bold cyan]")
     console.print()
-    console.print("TraceAI can automatically upload conversations to GitHub Gist")
+    console.print("TraceAI can automatically process conversations and save artifacts")
     console.print("when you push code by installing a git pre-push hook.")
     console.print()
     console.print("[dim]This enables the VSCode extension to show code provenance.[/dim]")
@@ -163,8 +209,8 @@ def auto_setup_hook_check():
             console.print("[green]✓ Git hook installed successfully![/green]")
             console.print()
             console.print("[bold]Next steps:[/bold]")
-            console.print("1. Set GITHUB_TOKEN in your environment or .env file")
-            console.print("2. Push your code - the hook will run automatically")
+            console.print("1. Push your code - the hook will run automatically")
+            console.print("2. Artifacts will be saved to .traceai/ directory")
             console.print()
 
             # Mark as prompted
@@ -238,7 +284,6 @@ def list_conversations(repo: str, session_id: Optional[str]):
 
 
 @main.command()
-@click.argument('output_file', type=click.Path())
 @click.option(
     '--repo',
     type=click.Path(exists=True, file_okay=False, dir_okay=True),
@@ -259,6 +304,12 @@ def list_conversations(repo: str, session_id: Optional[str]):
     help='Branch name (default: auto-detect from git)'
 )
 @click.option(
+    '--output-dir',
+    type=click.Path(),
+    default='.traceai',
+    help='Output directory for artifacts (default: .traceai)'
+)
+@click.option(
     '--no-git-correlation',
     is_flag=True,
     help='Skip git blame correlation'
@@ -269,17 +320,18 @@ def list_conversations(repo: str, session_id: Optional[str]):
     help='Skip AI-powered summary generation (requires ANTHROPIC_API_KEY)'
 )
 def process(
-    output_file: str,
     repo: str,
     session_id: Optional[str],
     pr_number: Optional[int],
     branch: Optional[str],
+    output_dir: str,
     no_git_correlation: bool,
     no_summary: bool
 ):
-    """Process a Claude Code conversation and generate artifact."""
+    """Process conversation and save artifacts to .traceai/ directory."""
     repo_path = Path(repo).resolve()
-    output_path = Path(output_file)
+    traceai_dir = repo_path / output_dir
+    traceai_dir.mkdir(parents=True, exist_ok=True)
 
     console.print(f"[bold]Processing conversation for {repo_path.name}...[/bold]")
 
@@ -342,12 +394,26 @@ def process(
                 console.print(f"[dim]  Set ANTHROPIC_API_KEY to enable AI-powered summaries[/dim]")
                 artifact.summary = summarizer.generate_fallback_summary(artifact)
 
-        # Write to file
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, 'w') as f:
-            f.write(artifact.to_json_string())
+        # Determine filenames
+        filename = get_artifact_filename(metadata['session_id'], pr_number)
+        json_path = traceai_dir / filename
+        md_path = traceai_dir / filename.replace('.json', '.md')
 
-        console.print(f"[green]✓[/green] Saved to {output_path}")
+        # Save JSON artifact
+        with open(json_path, 'w') as f:
+            f.write(artifact.to_json_string())
+        console.print(f"[green]✓[/green] Saved JSON to {json_path}")
+
+        # Generate and save Markdown summary
+        md_generator = markdown_gen.MarkdownGenerator(artifact)
+        md_content = md_generator.generate_full_summary()
+        with open(md_path, 'w') as f:
+            f.write(md_content)
+        console.print(f"[green]✓[/green] Saved Markdown to {md_path}")
+
+        # Update config.json
+        update_config(traceai_dir, filename, pr_number, branch)
+        console.print(f"[green]✓[/green] Updated config.json")
 
         # Show summary
         show_artifact_summary(artifact)
@@ -356,70 +422,6 @@ def process(
         console.print(f"[red]Error: {e}[/red]")
         import traceback
         traceback.print_exc()
-        sys.exit(1)
-
-
-@main.command()
-@click.argument('artifact_file', type=click.Path(exists=True))
-@click.option(
-    '--token',
-    help='GitHub token (default: GITHUB_TOKEN env var)'
-)
-@click.option(
-    '--public',
-    is_flag=True,
-    help='Create public Gist (default: secret)'
-)
-@click.option(
-    '--update',
-    help='Update existing Gist by ID'
-)
-def upload(artifact_file: str, token: Optional[str], public: bool, update: Optional[str]):
-    """Upload artifact to GitHub Gist."""
-    artifact_path = Path(artifact_file)
-
-    console.print(f"[bold]Uploading {artifact_path.name} to GitHub Gist...[/bold]")
-
-    try:
-        # Load artifact
-        with open(artifact_path, 'r') as f:
-            artifact = ConversationArtifact.model_validate_json(f.read())
-
-        # Create GitHub client
-        client = github_client.GitHubClient(token)
-        console.print(f"[green]✓[/green] Authenticated as {client.user.login}")
-
-        # Upload
-        with console.status("[bold green]Uploading to Gist..."):
-            gist = client.create_or_update_gist(
-                artifact,
-                existing_gist_id=update,
-                public=public
-            )
-
-        console.print(f"[green]✓[/green] Gist created/updated")
-        console.print()
-
-        # Show info
-        panel = Panel(
-            f"[bold]URL:[/bold] {gist.html_url}\n"
-            f"[bold]ID:[/bold] {gist.id}\n"
-            f"[bold]Public:[/bold] {gist.public}\n"
-            f"[bold]Description:[/bold] {gist.description}",
-            title="🎉 Gist Created Successfully",
-            border_style="green"
-        )
-        console.print(panel)
-
-        # Update artifact with Gist URL
-        artifact.metadata.gist_url = gist.html_url
-        with open(artifact_path, 'w') as f:
-            f.write(artifact.to_json_string())
-
-        console.print(f"[green]✓[/green] Updated artifact with Gist URL")
-
-    except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)
 
 
@@ -497,50 +499,26 @@ def pr_summary(artifact_file: str, output: Optional[str], compact: bool, timelin
     required=True,
     help='PR number'
 )
-@click.option(
-    '--token',
-    help='GitHub token (default: GITHUB_TOKEN env var)'
-)
-@click.option(
-    '--public',
-    is_flag=True,
-    help='Create public Gist (default: secret)'
-)
-@click.option(
-    '--output-dir',
-    type=click.Path(),
-    default='./traceai-output',
-    help='Output directory for artifacts'
-)
 def pipeline(
     repo: str,
     session_id: Optional[str],
-    pr_number: int,
-    token: Optional[str],
-    public: bool,
-    output_dir: str
+    pr_number: int
 ):
-    """Run full pipeline: process → upload → generate PR summary."""
+    """Run full pipeline: process conversation → generate PR summary."""
     repo_path = Path(repo).resolve()
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
 
     console.print("[bold]Running TraceAI Pipeline[/bold]")
     console.print()
-
-    # Step 1: Process
-    console.print("[bold cyan]Step 1/3:[/bold cyan] Processing conversation...")
-    artifact_file = output_path / 'artifact.json'
 
     try:
         from click.testing import CliRunner
         runner = CliRunner()
 
-        # Call process command
+        # Step 1: Process (saves to .traceai/ automatically)
+        console.print("[bold cyan]Step 1/2:[/bold cyan] Processing conversation...")
         result = runner.invoke(
             process,
             [
-                str(artifact_file),
                 '--repo', str(repo_path),
                 '--pr-number', str(pr_number),
             ] + (['--session-id', session_id] if session_id else []),
@@ -552,49 +530,10 @@ def pipeline(
 
         console.print()
 
-        # Step 2: Upload
-        console.print("[bold cyan]Step 2/3:[/bold cyan] Uploading to Gist...")
-        result = runner.invoke(
-            upload,
-            [
-                str(artifact_file),
-            ] + (['--token', token] if token else [])
-            + (['--public'] if public else []),
-            catch_exceptions=False
-        )
-
-        if result.exit_code != 0:
-            raise Exception("Upload step failed")
-
-        console.print()
-
-        # Create .traceai/config.json for VSCode extension
-        with open(artifact_file, 'r') as f:
-            updated_artifact = ConversationArtifact.model_validate_json(f.read())
-
-        if updated_artifact.metadata.gist_url:
-            traceai_dir = repo_path / '.traceai'
-            traceai_dir.mkdir(exist_ok=True)
-            config_file = traceai_dir / 'config.json'
-
-            config_data = {
-                'gist_id': updated_artifact.metadata.gist_url.split('/')[-1],
-                'gist_url': updated_artifact.metadata.gist_url,
-                'pr_number': pr_number,
-                'session_id': updated_artifact.metadata.session_id,
-                'last_updated': updated_artifact.metadata.end_time
-            }
-
-            with open(config_file, 'w') as f:
-                json.dump(config_data, f, indent=2)
-
-            console.print(f"[green]✓[/green] Created {config_file} for VSCode extension")
-
-        console.print()
-
-        # Step 3: Generate PR summary
-        console.print("[bold cyan]Step 3/3:[/bold cyan] Generating PR summary...")
-        pr_summary_file = output_path / 'pr-summary.md'
+        # Step 2: Generate PR summary
+        console.print("[bold cyan]Step 2/2:[/bold cyan] Generating PR summary...")
+        artifact_file = repo_path / '.traceai' / f'{pr_number}.json'
+        pr_summary_file = repo_path / '.traceai' / f'{pr_number}-summary.md'
 
         result = runner.invoke(
             pr_summary,
@@ -609,12 +548,15 @@ def pipeline(
 
         # Success!
         panel = Panel(
-            f"[green]✓[/green] Artifact: {artifact_file}\n"
-            f"[green]✓[/green] PR Summary: {pr_summary_file}\n"
+            f"[green]✓[/green] Artifacts saved to .traceai/\n"
+            f"  - {pr_number}.json (machine-readable)\n"
+            f"  - {pr_number}.md (human-readable)\n"
+            f"  - {pr_number}-summary.md (PR description)\n"
             f"\n[bold]Next steps:[/bold]\n"
-            f"1. Copy contents of {pr_summary_file}\n"
+            f"1. Copy contents of .traceai/{pr_number}-summary.md\n"
             f"2. Paste into your PR description\n"
-            f"3. Install VSCode extension to view code provenance",
+            f"3. Commit artifacts: git add .traceai/\n"
+            f"4. Install VSCode extension to view code provenance",
             title="🎉 Pipeline Complete!",
             border_style="green"
         )
@@ -651,31 +593,20 @@ def validate(artifact_file: str):
     help='Path to git repository'
 )
 @click.option(
-    '--token',
-    help='GitHub token (default: GITHUB_TOKEN env var)'
-)
-@click.option(
-    '--public',
-    is_flag=True,
-    help='Create public Gist (default: secret)'
-)
-@click.option(
     '--no-summary',
     is_flag=True,
     help='Skip AI summary generation'
 )
-def quick_upload(repo: str, token: Optional[str], public: bool, no_summary: bool):
+def quick_process(repo: str, no_summary: bool):
     """
-    Quick upload: Find latest session, process, and upload to Gist.
+    Quick process: Find latest session, process, and save locally.
 
-    This is designed for git hooks - finds the most recent Claude Code
-    conversation, processes it, and uploads to Gist in one command.
-
-    Automatically updates existing Gist if found for the current branch.
+    Designed for git hooks - processes most recent Claude Code
+    conversation and saves artifacts to .traceai/ in one command.
     """
     repo_path = Path(repo).resolve()
-    config_dir = repo_path / '.traceai'
-    config_file = config_dir / 'config.json'
+    traceai_dir = repo_path / '.traceai'
+    traceai_dir.mkdir(exist_ok=True)
 
     try:
         # Find most recent conversation
@@ -721,58 +652,29 @@ def quick_upload(repo: str, token: Optional[str], public: bool, no_summary: bool
             else:
                 artifact.summary = summarizer.generate_fallback_summary(artifact)
 
-        # Check for existing Gist ID in config (for updates)
-        existing_gist_id = None
-        if config_file.exists():
-            try:
-                with open(config_file, 'r') as f:
-                    config = json.load(f)
-                    # Check if config has gist_id for current branch
-                    if config.get('branch') == branch:
-                        existing_gist_id = config.get('gist_id')
-                        console.print(f"[dim]Found existing Gist for branch '{branch}', will update...[/dim]")
-            except:
-                pass
+        # Determine filenames
+        filename = get_artifact_filename(metadata['session_id'])
+        json_path = traceai_dir / filename
+        md_path = traceai_dir / filename.replace('.json', '.md')
 
-        # Upload to Gist (create or update)
-        client = github_client.GitHubClient(token)
+        # Save JSON artifact
+        with open(json_path, 'w') as f:
+            f.write(artifact.to_json_string())
 
-        if existing_gist_id:
-            # Update existing Gist
-            try:
-                gist = client.update_gist(existing_gist_id, artifact)
-                console.print(f"[green]✓ Gist updated[/green]")
-            except:
-                # If update fails (gist deleted, etc.), create new
-                console.print(f"[yellow]⚠ Could not update existing Gist, creating new...[/yellow]")
-                gist = client.create_gist(artifact, public=public)
-                console.print(f"[green]✓ Gist created[/green]")
-        else:
-            # Create new Gist
-            gist = client.create_gist(artifact, public=public)
-            console.print(f"[green]✓ Gist created[/green]")
+        # Generate and save Markdown summary
+        md_generator = markdown_gen.MarkdownGenerator(artifact)
+        md_content = md_generator.generate_full_summary()
+        with open(md_path, 'w') as f:
+            f.write(md_content)
 
-        # Update artifact with Gist URL
-        artifact.metadata.gist_url = gist.html_url
+        # Update config.json
+        update_config(traceai_dir, filename, None, branch)
 
-        # Save config file
-        config_dir.mkdir(exist_ok=True)
-        config_data = {
-            "gist_id": gist.id,
-            "gist_url": gist.html_url,
-            "branch": branch,
-            "last_updated": datetime.now().isoformat(),
-            "session_id": metadata['session_id']
-        }
+        console.print(f"[green]✓ Artifacts saved to {traceai_dir}[/green]")
+        console.print(f"  - {json_path.name}")
+        console.print(f"  - {md_path.name}")
 
-        with open(config_file, 'w') as f:
-            json.dump(config_data, f, indent=2)
-
-        # Output Gist URL (for hook to capture)
-        console.print(f"Gist URL: {gist.html_url}")
-        console.print(f"Config saved to: {config_file}")
-
-        return gist.html_url
+        return str(json_path)
 
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
@@ -792,8 +694,8 @@ def install_hook(type: str):
     """
     Install git hook for automatic TraceAI processing.
 
-    Installs a pre-push hook that automatically uploads conversations
-    to Gist when you push your code.
+    Installs a pre-push hook that automatically processes conversations
+    and saves artifacts to .traceai/ when you push your code.
     """
     import shutil
 
@@ -830,9 +732,9 @@ def install_hook(type: str):
     console.print(f"[dim]Location: {hook_path}[/dim]")
     console.print()
     console.print("[bold]Next steps:[/bold]")
-    console.print("1. Set GITHUB_TOKEN environment variable")
-    console.print("2. Push your code - the hook will run automatically")
-    console.print("3. Create a PR - GitHub Action will update the description")
+    console.print("1. Push your code - the hook will run automatically")
+    console.print("2. Artifacts will be saved to .traceai/ directory")
+    console.print("3. Commit artifacts with: git add .traceai/")
 
 
 @main.command()
@@ -897,9 +799,9 @@ def generate_hook_script(hook_type: str) -> str:
     if hook_type == 'pre-push':
         return '''#!/bin/bash
 # TraceAI pre-push hook
-# Automatically uploads conversation to Gist before pushing
+# Automatically processes conversation and saves artifacts locally
 
-# Only run if pushing to a feature branch (not main/master)
+# Only run on feature branches (not main/master)
 branch=$(git rev-parse --abbrev-ref HEAD)
 if [[ "$branch" == "main" ]] || [[ "$branch" == "master" ]]; then
   exit 0
@@ -910,73 +812,41 @@ if [ ! -d "$HOME/.claude/projects" ]; then
   exit 0
 fi
 
-# Load .env file if it exists (for GITHUB_TOKEN)
-REPO_PATH=$(pwd)
-if [ -f "$REPO_PATH/.env" ]; then
-  export $(grep -v '^#' "$REPO_PATH/.env" | xargs)
-fi
-
-# Check if GITHUB_TOKEN is set (either from env or .env file)
-if [ -z "$GITHUB_TOKEN" ]; then
-  echo "⚠️  TraceAI: GITHUB_TOKEN not set in environment or .env, skipping"
-  exit 0
-fi
-
-# Check if config.json already exists and is staged
-# If so, this means we already processed this in a previous hook run
-if git diff --cached --name-only | grep -q "^.traceai/config.json$"; then
-  # Config is already staged, this is the retry push - let it through
+# Skip if artifacts already staged (avoid re-processing)
+if git diff --cached --name-only | grep -q "^.traceai/.*\\.json$"; then
   exit 0
 fi
 
 echo "🤖 TraceAI: Processing conversation..."
 
-# Find and upload latest session
 REPO_PATH=$(pwd)
 
-# Run quick-upload (handles creating/updating Gist and saving config)
-OUTPUT=$(traceai quick-upload --repo "$REPO_PATH" 2>&1)
+# Run quick-process (no GitHub token needed!)
+OUTPUT=$(traceai quick-process --repo "$REPO_PATH" 2>&1)
 EXIT_CODE=$?
 
 if [ $EXIT_CODE -eq 0 ]; then
-  # Extract Gist URL from output
-  GIST_URL=$(echo "$OUTPUT" | grep "Gist URL:" | cut -d' ' -f3)
+  # Check if artifacts were created
+  if ls .traceai/*.json 1> /dev/null 2>&1; then
+    echo "✅ TraceAI: Artifacts saved to .traceai/"
+    echo ""
+    echo "📝 Staging TraceAI artifacts..."
 
-  if [ -n "$GIST_URL" ]; then
-    # Check if config file was created/updated
-    if [ -f ".traceai/config.json" ]; then
-      # Check if config.json has changed
-      if ! git diff --quiet .traceai/config.json 2>/dev/null; then
-        echo "✅ TraceAI: Uploaded to $GIST_URL"
-        echo ""
-        echo "📝 Adding TraceAI config to commit..."
+    # Stage all new/modified artifacts
+    git add .traceai/*.json .traceai/*.md .traceai/config.json
 
-        # Add config to git
-        git add .traceai/config.json
+    # Amend the last commit to include artifacts
+    git commit --amend --no-edit --no-verify 2>/dev/null || {
+      git commit -m "chore: add TraceAI conversation artifacts" --no-verify 2>/dev/null || true
+    }
 
-        # Amend the last commit to include the config
-        # This works because we're in pre-push, before the push happens
-        git commit --amend --no-edit --no-verify 2>/dev/null || {
-          # If amend fails (maybe nothing to amend), create new commit
-          git commit -m "chore: update TraceAI conversation artifact" --no-verify 2>/dev/null || true
-        }
-
-        echo "✓ Config included in commit"
-      else
-        echo "✅ TraceAI: Config already up to date"
-      fi
-    else
-      echo "⚠️  TraceAI: Config file not found"
-    fi
-  else
-    echo "⚠️  TraceAI: Could not extract Gist URL"
+    echo "✓ Artifacts included in commit"
   fi
 else
-  echo "⚠️  TraceAI: Upload failed or no conversation found"
+  echo "⚠️  TraceAI: Processing failed or no conversation found"
   echo "$OUTPUT" | grep -i "error" || true
 fi
 
-# Continue with push
 exit 0
 '''
 
@@ -990,22 +860,15 @@ if [ ! -d "$HOME/.claude/projects" ]; then
   exit 0
 fi
 
-# Check if GITHUB_TOKEN is set
-if [ -z "$GITHUB_TOKEN" ]; then
-  exit 0
-fi
-
 echo "🤖 TraceAI: Processing conversation..."
 
 REPO_PATH=$(pwd)
-GIST_URL=$(traceai quick-upload --repo "$REPO_PATH" 2>&1 | grep "Gist URL:" | cut -d' ' -f3)
+traceai quick-process --repo "$REPO_PATH" 2>&1
 
-if [ -n "$GIST_URL" ]; then
-  mkdir -p .traceai
-  echo "$GIST_URL" > .traceai/gist-url.txt
-  git add .traceai/gist-url.txt
+if [ $? -eq 0 ] && [ -d ".traceai" ]; then
+  git add .traceai/*.json .traceai/*.md .traceai/config.json
   git commit --amend --no-edit --no-verify
-  echo "✅ TraceAI: Uploaded to $GIST_URL"
+  echo "✅ TraceAI: Artifacts saved to .traceai/"
 fi
 
 exit 0

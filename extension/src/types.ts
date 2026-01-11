@@ -147,3 +147,14 @@ export interface TraceAIConfig {
   showGutterIcons: boolean;
   showFileStats: boolean;
 }
+
+/**
+ * Configuration file stored in .traceai/config.json
+ * Matches the TraceAIConfig model from pipeline/traceai/models.py
+ */
+export interface LocalArtifactConfig {
+  artifact_files: string[];  // List of artifact JSON filenames
+  pr_number?: number | null;
+  branch?: string | null;
+  last_updated: string;
+}

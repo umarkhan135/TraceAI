@@ -1,185 +1,150 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { ConversationArtifact } from './types';
-import { githubClient } from './githubClient';
-import { localLoader } from './localLoader';
-import { getRepoInfo } from './gitUtils';
+import { ConversationArtifact, LocalArtifactConfig } from './types';
 
 /**
- * Configuration file structure from .traceai/config.json
- */
-interface TraceAIConfig {
-  gist_id: string;
-  gist_url: string;
-  pr_number?: number;
-  session_id: string;
-  last_updated: string;
-}
-
-/**
- * Unified loader that:
- * 1. Checks for .traceai/config.json (created by pipeline)
- * 2. If config exists, fetches from GitHub Gist and caches locally
- * 3. Falls back to local .traceai/artifacts.json if no config
+ * Unified loader for local artifacts.
  *
- * This implements the integration flow from PHASETWO.md
+ * Reads artifacts directly from .traceai/ directory without GitHub API calls.
+ * This is much simpler and faster than the previous Gist-based approach.
  */
 export class UnifiedLoader {
   private artifactCache: Map<string, ConversationArtifact> = new Map();
 
   /**
-   * Load artifact using the complete integration flow
+   * Load artifacts from .traceai/ directory
    */
   async loadArtifact(workspacePath: string): Promise<ConversationArtifact | null> {
-    // Check memory cache first
+    // Check memory cache
     const cached = this.artifactCache.get(workspacePath);
     if (cached) {
       console.log('TraceAI: Using cached artifact');
       return cached;
     }
 
-    // Try config-based workflow first (new integration path)
-    const configArtifact = await this.loadFromConfig(workspacePath);
-    if (configArtifact) {
-      this.artifactCache.set(workspacePath, configArtifact);
-      return configArtifact;
+    // Load from local files
+    const artifact = await this.loadFromLocal(workspacePath);
+
+    if (artifact) {
+      this.artifactCache.set(workspacePath, artifact);
     }
 
-    // Fall back to local artifacts.json (backward compatibility)
-    console.log('TraceAI: No config found, falling back to local loader');
-    const localArtifact = await localLoader.loadArtifact(workspacePath);
-    if (localArtifact) {
-      this.artifactCache.set(workspacePath, localArtifact);
-    }
-
-    return localArtifact;
-  }
-
-  /**
-   * Load artifact using config.json workflow:
-   * 1. Get repository information from Git
-   * 2. Fetch ALL TraceAI Gists for this repository from GitHub
-   * 3. Merge them into a unified artifact
-   * 4. Cache to .traceai/artifacts.json
-   *
-   * This enables showing AI-generated code from multiple PRs/conversations
-   */
-  private async loadFromConfig(workspacePath: string): Promise<ConversationArtifact | null> {
-    const configPath = path.join(workspacePath, '.traceai', 'config.json');
-
-    // Check if we have a recent cached artifact
-    const artifactsPath = path.join(workspacePath, '.traceai', 'artifacts.json');
-    if (fs.existsSync(artifactsPath)) {
-      const stats = fs.statSync(artifactsPath);
-      const now = Date.now();
-      const cacheAge = now - stats.mtimeMs;
-      const config = vscode.workspace.getConfiguration('traceai');
-      const maxAge = config.get<number>('cacheExpiration', 3600) * 1000;
-
-      // If cache is fresh, use it
-      if (cacheAge < maxAge) {
-        console.log('TraceAI: Using cached artifacts.json (fresh)');
-        try {
-          const content = fs.readFileSync(artifactsPath, 'utf8');
-          return JSON.parse(content) as ConversationArtifact;
-        } catch (error) {
-          console.warn('TraceAI: Failed to parse cached artifacts, will refetch');
-        }
-      }
-    }
-
-    // Get repository information
-    const repoInfo = await getRepoInfo(workspacePath);
-    if (!repoInfo) {
-      console.log('TraceAI: Unable to determine repository information');
-
-      // Fallback: if config.json exists, try to fetch that single Gist
-      if (fs.existsSync(configPath)) {
-        return this.loadSingleGistFromConfig(configPath, workspacePath);
-      }
-
-      return null;
-    }
-
-    console.log(`TraceAI: Found repository: ${repoInfo.fullName}`);
-
-    // Fetch ALL Gists for this repository
-    const artifact = await githubClient.fetchAllGistsForRepo(repoInfo.fullName);
-
-    if (!artifact) {
-      console.log('TraceAI: Failed to fetch Gists for repository');
-
-      // Fallback: if config.json exists, try to fetch that single Gist
-      if (fs.existsSync(configPath)) {
-        return this.loadSingleGistFromConfig(configPath, workspacePath);
-      }
-
-      return null;
-    }
-
-    // Cache the merged artifact locally
-    await this.cacheArtifactLocally(workspacePath, artifact);
-
-    console.log(`TraceAI: Loaded merged artifact with ${artifact.mappings.length} mappings`);
     return artifact;
   }
 
   /**
-   * Fallback: Load a single Gist from config.json
-   * Used when we can't determine repository info or fetch all Gists
+   * Load artifacts from .traceai/ directory
    */
-  private async loadSingleGistFromConfig(
-    configPath: string,
-    workspacePath: string
-  ): Promise<ConversationArtifact | null> {
+  private async loadFromLocal(workspacePath: string): Promise<ConversationArtifact | null> {
+    const configPath = path.join(workspacePath, '.traceai', 'config.json');
+
+    // Check if config exists
+    if (!fs.existsSync(configPath)) {
+      console.log('TraceAI: No config.json found');
+      return null;
+    }
+
     try {
+      // Read config
       const configContent = fs.readFileSync(configPath, 'utf8');
-      const config: TraceAIConfig = JSON.parse(configContent);
+      const config: LocalArtifactConfig = JSON.parse(configContent);
 
-      console.log(`TraceAI: Falling back to single Gist: ${config.gist_id}`);
+      // Load all artifact files
+      const artifacts: ConversationArtifact[] = [];
 
-      const artifact = await githubClient.fetchGist(config.gist_id);
+      for (const filename of config.artifact_files) {
+        const artifactPath = path.join(workspacePath, '.traceai', filename);
 
-      if (artifact) {
-        await this.cacheArtifactLocally(workspacePath, artifact);
+        if (fs.existsSync(artifactPath)) {
+          const content = fs.readFileSync(artifactPath, 'utf8');
+          const artifact = JSON.parse(content) as ConversationArtifact;
+          artifacts.push(artifact);
+        } else {
+          console.warn(`TraceAI: Artifact not found: ${filename}`);
+        }
       }
 
-      return artifact;
+      if (artifacts.length === 0) {
+        console.log('TraceAI: No artifacts loaded');
+        return null;
+      }
+
+      // Single artifact - return directly
+      if (artifacts.length === 1) {
+        console.log(`TraceAI: Loaded 1 artifact with ${artifacts[0].mappings.length} mappings`);
+        return artifacts[0];
+      }
+
+      // Multiple artifacts - merge
+      const merged = this.mergeArtifacts(artifacts);
+      console.log(`TraceAI: Merged ${artifacts.length} artifacts with ${merged.mappings.length} total mappings`);
+      return merged;
+
     } catch (error) {
-      console.error('TraceAI: Failed to load single Gist from config:', error);
+      console.error('TraceAI: Failed to load artifacts:', error);
       return null;
     }
   }
 
   /**
-   * Cache the fetched artifact to .traceai/artifacts.json
+   * Merge multiple artifacts into one
    */
-  private async cacheArtifactLocally(
-    workspacePath: string,
-    artifact: ConversationArtifact
-  ): Promise<void> {
-    const traceaiDir = path.join(workspacePath, '.traceai');
-    const artifactsPath = path.join(traceaiDir, 'artifacts.json');
+  private mergeArtifacts(artifacts: ConversationArtifact[]): ConversationArtifact {
+    // Sort by end_time (most recent first)
+    const sorted = artifacts.sort((a, b) => {
+      const timeA = new Date(a.metadata.end_time).getTime();
+      const timeB = new Date(b.metadata.end_time).getTime();
+      return timeB - timeA;
+    });
 
-    try {
-      // Ensure .traceai directory exists
-      if (!fs.existsSync(traceaiDir)) {
-        fs.mkdirSync(traceaiDir, { recursive: true });
+    const base = sorted[0];
+    const merged: ConversationArtifact = {
+      ...base,
+      conversation_id: `merged-${artifacts.length}-conversations`,
+      mappings: [],
+      conversation: [],
+      stats: {
+        total_messages: 0,
+        total_prompts: 0,
+        files_modified: 0,
+        total_tokens: 0,
+        ai_generated_lines: null
+      }
+    };
+
+    // Merge all mappings and conversations
+    for (const artifact of sorted) {
+      // Add mappings with PR prefix if available
+      const prefix = artifact.metadata.pr_number ? `[PR #${artifact.metadata.pr_number}] ` : '';
+
+      for (const mapping of artifact.mappings) {
+        merged.mappings.push({
+          ...mapping,
+          prompt_preview: prefix + mapping.prompt_preview
+        });
       }
 
-      // Write artifact to file
-      fs.writeFileSync(
-        artifactsPath,
-        JSON.stringify(artifact, null, 2),
-        'utf8'
-      );
+      // Merge conversations (offset indices)
+      const indexOffset = merged.conversation.length;
+      for (const msg of artifact.conversation) {
+        merged.conversation.push({
+          ...msg,
+          index: msg.index + indexOffset
+        });
+      }
 
-      console.log(`TraceAI: Cached artifact to ${artifactsPath}`);
-    } catch (error) {
-      console.error('TraceAI: Failed to cache artifact locally:', error);
-      // Non-fatal error - artifact is still usable from memory
+      // Aggregate stats
+      merged.stats.total_messages += artifact.stats.total_messages;
+      merged.stats.total_prompts += artifact.stats.total_prompts;
+      merged.stats.total_tokens += artifact.stats.total_tokens || 0;
     }
+
+    // Count unique files
+    const uniqueFiles = new Set(merged.mappings.map(m => m.file));
+    merged.stats.files_modified = uniqueFiles.size;
+
+    return merged;
   }
 
   /**
@@ -212,7 +177,6 @@ export class UnifiedLoader {
    */
   clearCache(): void {
     this.artifactCache.clear();
-    localLoader.clearCache();
     console.log('TraceAI: Cache cleared');
   }
 }

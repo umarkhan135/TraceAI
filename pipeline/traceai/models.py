@@ -91,10 +91,6 @@ class ArtifactMetadata(BaseModel):
         default=None,
         description="Version of Claude Code used"
     )
-    gist_url: Optional[str] = Field(
-        default=None,
-        description="URL to GitHub Gist (filled after upload)"
-    )
 
 
 class ArtifactStats(BaseModel):
@@ -207,46 +203,25 @@ class ConversationArtifact(BaseModel):
         return self.model_dump_json(indent=indent)
 
 
-class GistUploadRequest(BaseModel):
-    """Request model for uploading a conversation artifact to Gist."""
+class TraceAIConfig(BaseModel):
+    """Configuration file stored in .traceai/config.json."""
 
-    artifact: ConversationArtifact = Field(..., description="Conversation artifact to upload")
-    description: str = Field(
-        default="TraceAI Conversation Artifact",
-        description="Gist description"
+    artifact_files: List[str] = Field(
+        default_factory=list,
+        description="List of artifact JSON filenames in .traceai/ directory"
     )
-    public: bool = Field(
-        default=False,
-        description="Whether to create a public or secret Gist"
-    )
-    filename: str = Field(
-        default="conversation.json",
-        description="Filename for the JSON artifact in the Gist"
-    )
-
-
-class GistUploadResponse(BaseModel):
-    """Response model after uploading to Gist."""
-
-    gist_id: str = Field(..., description="GitHub Gist ID")
-    id: str = Field(..., description="GitHub Gist ID (alias for compatibility)")
-    gist_url: str = Field(..., description="API URL to the Gist")
-    html_url: str = Field(..., description="Human-readable Gist URL")
-    public: bool = Field(default=False, description="Whether the Gist is public")
-    description: str = Field(default="", description="Gist description")
-    created_at: str = Field(..., description="When the Gist was created")
+    pr_number: Optional[int] = Field(default=None, description="Associated PR number")
+    branch: Optional[str] = Field(default=None, description="Git branch name")
+    last_updated: str = Field(..., description="ISO 8601 timestamp of last update")
 
     class Config:
         """Pydantic configuration."""
         json_schema_extra = {
             "example": {
-                "gist_id": "abc123def456",
-                "id": "abc123def456",
-                "gist_url": "https://api.github.com/gists/abc123def456",
-                "html_url": "https://gist.github.com/username/abc123def456",
-                "public": False,
-                "description": "TraceAI Conversation",
-                "created_at": "2026-01-10T16:00:00Z"
+                "artifact_files": ["42.json", "abc123.json"],
+                "pr_number": 42,
+                "branch": "feature/auth",
+                "last_updated": "2026-01-10T16:00:00Z"
             }
         }
 
@@ -285,3 +260,51 @@ class RawToolResult(BaseModel):
     timestamp: str
     sessionId: str
     message: Dict[str, Any]
+
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+def get_artifact_filename(session_id: str, pr_number: Optional[int] = None) -> str:
+    """
+    Generate artifact filename based on PR number or session ID.
+
+    Args:
+        session_id: Claude Code session UUID
+        pr_number: Optional PR number
+
+    Returns:
+        "{pr_number}.json" if PR known, else "{session_id}.json"
+
+    Examples:
+        >>> get_artifact_filename("abc123", 42)
+        "42.json"
+        >>> get_artifact_filename("abc123")
+        "abc123.json"
+    """
+    if pr_number:
+        return f"{pr_number}.json"
+    return f"{session_id}.json"
+
+
+def get_artifact_markdown_filename(session_id: str, pr_number: Optional[int] = None) -> str:
+    """
+    Generate markdown filename based on PR number or session ID.
+
+    Args:
+        session_id: Claude Code session UUID
+        pr_number: Optional PR number
+
+    Returns:
+        "{pr_number}.md" if PR known, else "{session_id}.md"
+
+    Examples:
+        >>> get_artifact_markdown_filename("abc123", 42)
+        "42.md"
+        >>> get_artifact_markdown_filename("abc123")
+        "abc123.md"
+    """
+    if pr_number:
+        return f"{pr_number}.md"
+    return f"{session_id}.md"
