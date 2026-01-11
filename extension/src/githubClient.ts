@@ -90,6 +90,13 @@ export class GitHubClient {
   }
 
   /**
+   * Alias for fetchGist - fetches Gist artifact by ID
+   */
+  async fetchGistArtifact(gistId: string): Promise<ConversationArtifact | null> {
+    return this.fetchGist(gistId);
+  }
+
+  /**
    * Search for TraceAI Gists associated with a repository
    */
   async findGistsForRepo(repoFullName: string): Promise<string[]> {
