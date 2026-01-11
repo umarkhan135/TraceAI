@@ -1,0 +1,55 @@
+# Build output
+.vscode/**
+.vscode-test/**
+src/**
+.gitignore
+.yarnrc
+vsc-extension-quickstart.md
+**/tsconfig.json
+**/.eslintrc.json
+**/*.map
+**/*.ts
+
+# Test files
+**/__tests__/**
+**/*.test.ts
+**/*.spec.ts
+jest.config.js
+coverage/**
+
+# Development files
+.editorconfig
+.prettierrc
+tsconfig.json
+tslint.json
+
+# Documentation (keep only essential ones)
+**/*.md
+!README.md
+!CHANGELOG.md
+
+# Node modules (include only necessary runtime deps)
+**/node_modules/@types/**
+**/node_modules/**/test/**
+**/node_modules/**/tests/**
+**/node_modules/**/*.md
+**/node_modules/**/*.ts
+**/node_modules/**/*.map
+
+# Logs and temp files
+*.log
+.DS_Store
+Thumbs.db
+
+# Git files
+.git/**
+.github/**
+
+# Python code (deprecated)
+pipeline/**
+*.py
+*.pyc
+__pycache__/**
+
+# Other build artifacts
+*.vsix

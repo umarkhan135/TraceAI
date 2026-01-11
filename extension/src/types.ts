@@ -87,7 +87,6 @@ export interface CacheEntry<T> {
 }
 
 export interface TraceAIConfig {
-  githubToken: string;
   enableHover: boolean;
   cacheExpiration: number;
   showGutterIcons: boolean;

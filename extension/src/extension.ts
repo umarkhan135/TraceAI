@@ -4,7 +4,10 @@ import { TraceAIDecorationProvider } from './decorationProvider';
 import { localLoader } from './localLoader';
 import { unifiedLoader } from './unifiedLoader';
 import { cache } from './cache';
-import { githubClient } from './githubClient';
+import { TraceAICommands } from './commands';
+import { HookInstaller } from './services/hookInstaller';
+import { githubService } from './services/githubService';
+import { ConfigMigration } from './services/configMigration';
 
 let hoverProvider: TraceAIHoverProvider;
 let decorationProvider: TraceAIDecorationProvider;
@@ -12,29 +15,43 @@ let decorationProvider: TraceAIDecorationProvider;
 export function activate(context: vscode.ExtensionContext) {
   console.log('TraceAI: Extension activating...');
 
-  const config = vscode.workspace.getConfiguration('traceai');
-  const githubToken = config.get<string>('githubToken', '');
+  // Register all commands
+  TraceAICommands.register(context);
 
   if (vscode.workspace.workspaceFolders) {
     for (const folder of vscode.workspace.workspaceFolders) {
-      cache.initialize(folder.uri.fsPath);
+      const repoPath = folder.uri.fsPath;
 
-      const configWatcher = unifiedLoader.createConfigWatcher(folder.uri.fsPath);
+      cache.initialize(repoPath);
+
+      const configWatcher = unifiedLoader.createConfigWatcher(repoPath);
       context.subscriptions.push(configWatcher);
 
-      const artifactsWatcher = localLoader.createFileWatcher(folder.uri.fsPath);
+      const artifactsWatcher = localLoader.createFileWatcher(repoPath);
       context.subscriptions.push(artifactsWatcher);
+
+      // Auto-migrate config if needed
+      ConfigMigration.autoMigrateRepo(repoPath);
+
+      // Check and prompt for hook installation
+      HookInstaller.shouldAutoInstall(repoPath).then(should => {
+        if (should) {
+          HookInstaller.promptInstallation(repoPath);
+        }
+      });
 
       console.log(`TraceAI: Initialized for workspace: ${folder.name}`);
     }
   }
 
-  if (githubToken) {
-    githubClient.initialize(githubToken);
-    console.log('TraceAI: GitHub client initialized with token');
-  } else {
-    console.log('TraceAI: No GitHub token configured, running in local-only mode');
-  }
+  // Initialize GitHub service (uses VS Code auth)
+  githubService.initialize().then(success => {
+    if (success) {
+      console.log('TraceAI: GitHub service initialized with VS Code auth');
+    } else {
+      console.log('TraceAI: GitHub service not authenticated (will work in offline mode)');
+    }
+  });
 
   decorationProvider = new TraceAIDecorationProvider();
   context.subscriptions.push(decorationProvider);
@@ -131,14 +148,6 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(toggleDecorationsCommand);
 
   const configDisposable = vscode.workspace.onDidChangeConfiguration(e => {
-    if (e.affectsConfiguration('traceai.githubToken')) {
-      const newConfig = vscode.workspace.getConfiguration('traceai');
-      const newToken = newConfig.get<string>('githubToken', '');
-      githubClient.initialize(newToken);
-      hoverProvider.clearCache();
-      console.log('TraceAI: GitHub token updated');
-    }
-
     if (e.affectsConfiguration('traceai.cacheExpiration')) {
       cache.clear();
       console.log('TraceAI: Cache expiration changed, cache cleared');
@@ -147,9 +156,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(configDisposable);
 
   console.log('TraceAI: Extension activated successfully');
-  vscode.window.showInformationMessage(
-    'TraceAI: Extension activated. Hover over code to see AI prompt provenance.'
-  );
+  // Don't show popup - too intrusive for background extension
 }
 
 export function deactivate() {
