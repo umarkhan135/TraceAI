@@ -1,9 +1,3 @@
-"""
-GitHub client for TraceAI.
-
-Handles uploading conversation artifacts to GitHub Gist.
-"""
-
 import os
 import json
 from datetime import datetime
@@ -15,24 +9,8 @@ from .models import ConversationArtifact, GistUploadRequest, GistUploadResponse
 
 
 class GitHubClient:
-    """
-    Client for interacting with GitHub API.
-
-    Handles authentication and Gist operations for TraceAI.
-    """
 
     def __init__(self, token: Optional[str] = None):
-        """
-        Initialize GitHub client.
-
-        Args:
-            token: GitHub personal access token. If None, will try to load from
-                   GITHUB_TOKEN environment variable.
-
-        Raises:
-            ValueError: If no token is provided or found in environment.
-        """
-        # Load from .env if not provided
         if token is None:
             load_dotenv()
             token = os.getenv('GITHUB_TOKEN')
@@ -49,7 +27,6 @@ class GitHubClient:
 
     @property
     def user(self):
-        """Get authenticated user (cached)."""
         if self._user is None:
             self._user = self.github.get_user()
         return self._user
@@ -62,45 +39,24 @@ class GitHubClient:
         filename: str = "conversation.json",
         include_markdown: bool = True
     ) -> GistUploadResponse:
-        """
-        Upload a conversation artifact to GitHub Gist.
-
-        Args:
-            artifact: ConversationArtifact to upload
-            description: Gist description
-            public: Whether to create a public (True) or secret (False) Gist
-            filename: Filename for the JSON artifact
-            include_markdown: Whether to also generate a human-readable Markdown file
-
-        Returns:
-            GistUploadResponse with Gist URLs and metadata
-
-        Raises:
-            GithubException: If upload fails
-        """
         try:
-            # Prepare files for Gist
             files = {}
 
-            # Add JSON artifact
             artifact_json = artifact.model_dump(mode='json')
             files[filename] = InputFileContent(
                 json.dumps(artifact_json, indent=2)
             )
 
-            # Optionally add Markdown summary
             if include_markdown:
                 markdown_content = self._generate_markdown_summary(artifact)
                 files["README.md"] = InputFileContent(markdown_content)
 
-            # Create Gist
             gist = self.user.create_gist(
                 public=public,
                 files=files,
                 description=description
             )
 
-            # Build response
             response = GistUploadResponse(
                 gist_id=gist.id,
                 id=gist.id,
@@ -124,18 +80,6 @@ class GitHubClient:
             )
 
     def get_gist(self, gist_id: str) -> dict:
-        """
-        Fetch a Gist by ID.
-
-        Args:
-            gist_id: GitHub Gist ID
-
-        Returns:
-            Gist data as dictionary
-
-        Raises:
-            GithubException: If Gist not found or access denied
-        """
         try:
             gist = self.github.get_gist(gist_id)
 
@@ -168,15 +112,6 @@ class GitHubClient:
             raise
 
     def delete_gist(self, gist_id: str) -> None:
-        """
-        Delete a Gist by ID.
-
-        Args:
-            gist_id: GitHub Gist ID
-
-        Raises:
-            GithubException: If deletion fails
-        """
         try:
             gist = self.github.get_gist(gist_id)
             gist.delete()
@@ -189,18 +124,8 @@ class GitHubClient:
             )
 
     def _generate_markdown_summary(self, artifact: ConversationArtifact) -> str:
-        """
-        Generate a human-readable Markdown summary of the conversation.
-
-        Args:
-            artifact: ConversationArtifact to summarize
-
-        Returns:
-            Markdown-formatted summary
-        """
         md = []
 
-        # Header
         md.append(f"# TraceAI Conversation: {artifact.conversation_id}")
         md.append("")
         md.append(
@@ -208,7 +133,6 @@ class GitHubClient:
         md.append("an LLM-native code provenance tool for AI-assisted development.")
         md.append("")
 
-        # Metadata
         md.append("## Metadata")
         md.append("")
         md.append(f"- **Session ID**: `{artifact.metadata.session_id}`")
@@ -225,7 +149,6 @@ class GitHubClient:
             md.append(f"- **Duration**: {duration_mins:.1f} minutes")
         md.append("")
 
-        # Stats
         md.append("## Summary")
         md.append("")
         md.append(f"- **Total Prompts**: {artifact.stats.total_prompts}")
@@ -234,12 +157,10 @@ class GitHubClient:
         md.append(f"- **Tokens Used**: {artifact.stats.total_tokens:,}")
         md.append("")
 
-        # Files modified
         if artifact.mappings:
             md.append("## Files Modified")
             md.append("")
 
-            # Group mappings by file
             files_map = {}
             for mapping in artifact.mappings:
                 file_path = mapping.file
@@ -264,23 +185,19 @@ class GitHubClient:
                     md.append(f"   - Time: {mapping.timestamp}")
                     md.append("")
 
-        # Full conversation in alternating format
         md.append("## 💬 Conversation")
         md.append("")
 
         for msg in artifact.conversation:
             if msg.role == "user":
-                # User prompt (plain text)
                 md.append(msg.content)
                 md.append("")
             elif msg.role == "assistant":
-                # Assistant response (quoted with >)
                 response_lines = msg.content.split("\n")
                 for line in response_lines:
                     md.append(f"> {line}")
                 md.append("")
 
-        # Footer
         md.append("---")
         md.append("")
         md.append(
@@ -295,34 +212,19 @@ class GitHubClient:
         public: bool = False,
         description: Optional[str] = None
     ):
-        """
-        Create a new Gist with conversation artifact.
-
-        Args:
-            artifact: ConversationArtifact to upload
-            public: Whether to create a public Gist
-            description: Custom description (auto-generated if None)
-
-        Returns:
-            Gist object from PyGithub
-        """
         if description is None:
             description = f"TraceAI Conversation - {artifact.conversation_id}"
 
-        # Prepare files
         files = {}
 
-        # Add JSON artifact
         artifact_json = artifact.model_dump(mode='json')
         files["conversation.json"] = InputFileContent(
             json.dumps(artifact_json, indent=2)
         )
 
-        # Add Markdown summary
         markdown_content = self._generate_markdown_summary(artifact)
         files["README.md"] = InputFileContent(markdown_content)
 
-        # Create Gist
         gist = self.user.create_gist(
             public=public,
             files=files,
@@ -336,35 +238,18 @@ class GitHubClient:
         gist_id: str,
         artifact: ConversationArtifact
     ):
-        """
-        Update an existing Gist with new artifact data.
-
-        Args:
-            gist_id: ID of existing Gist
-            artifact: Updated ConversationArtifact
-
-        Returns:
-            Updated Gist object
-
-        Raises:
-            GithubException: If Gist not found or update fails
-        """
         gist = self.github.get_gist(gist_id)
 
-        # Prepare updated files
         files = {}
 
-        # Update JSON artifact
         artifact_json = artifact.model_dump(mode='json')
         files["conversation.json"] = InputFileContent(
             json.dumps(artifact_json, indent=2)
         )
 
-        # Update Markdown summary
         markdown_content = self._generate_markdown_summary(artifact)
         files["README.md"] = InputFileContent(markdown_content)
 
-        # Update Gist
         gist.edit(files=files)
 
         return gist
@@ -375,23 +260,10 @@ class GitHubClient:
         existing_gist_id: Optional[str] = None,
         public: bool = False
     ) -> GistUploadResponse:
-        """
-        Create a new Gist or update an existing one.
-
-        Args:
-            artifact: ConversationArtifact to upload
-            existing_gist_id: ID of existing Gist to update (None = create new)
-            public: Whether to create a public or secret Gist
-
-        Returns:
-            GistUploadResponse with Gist URLs
-        """
         if existing_gist_id:
-            # Update existing Gist
             try:
                 gist = self.github.get_gist(existing_gist_id)
 
-                # Update files
                 artifact_json = artifact.model_dump(mode='json')
                 files = {
                     "conversation.json": InputFileContent(
@@ -399,7 +271,6 @@ class GitHubClient:
                     )
                 }
 
-                # Optionally update Markdown
                 markdown_content = self._generate_markdown_summary(artifact)
                 files["README.md"] = InputFileContent(markdown_content)
 
@@ -423,16 +294,18 @@ class GitHubClient:
                     headers=e.headers
                 )
         else:
-            # Create new Gist
-            return self.create_gist(artifact, public=public)
+            gist = self.create_gist(artifact, public=public)
+            return GistUploadResponse(
+                gist_id=gist.id,
+                id=gist.id,
+                gist_url=gist.url,
+                html_url=gist.html_url,
+                public=gist.public,
+                description=gist.description or "",
+                created_at=gist.created_at.isoformat()
+            )
 
     def get_rate_limit(self) -> dict:
-        """
-        Get current API rate limit status.
-
-        Returns:
-            Dictionary with rate limit info
-        """
         rate_limit = self.github.get_rate_limit()
         return {
             "core": {

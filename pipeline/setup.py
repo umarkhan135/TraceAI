@@ -15,13 +15,6 @@ setup(
         "python-dateutil>=2.8.2",
     ],
     extras_require={
-        "dev": [
-            "pytest>=7.4.3",
-            "pytest-cov>=4.1.0",
-            "black>=23.12.0",
-            "mypy>=1.7.1",
-            "ruff>=0.1.9",
-        ],
         "ai": [
             "anthropic>=0.18.0",
         ],

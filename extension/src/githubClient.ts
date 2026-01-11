@@ -3,34 +3,23 @@ import { Octokit } from '@octokit/rest';
 import { ConversationArtifact } from './types';
 import { cache } from './cache';
 
-/**
- * GitHub API client for fetching Gist data
- */
 export class GitHubClient {
   private octokit: Octokit | null = null;
 
-  /**
-   * Initialize the GitHub client with a token
-   */
   initialize(token: string): void {
     if (token) {
       this.octokit = new Octokit({ auth: token });
     } else {
-      // Unauthenticated client (lower rate limits)
       this.octokit = new Octokit();
     }
   }
 
-  /**
-   * Fetch a Gist by ID and parse the TraceAI artifact
-   */
   async fetchGist(gistId: string): Promise<ConversationArtifact | null> {
     if (!this.octokit) {
       vscode.window.showWarningMessage('TraceAI: GitHub client not initialized');
       return null;
     }
 
-    // Check cache first
     const config = vscode.workspace.getConfiguration('traceai');
     const cacheExpiration = config.get<number>('cacheExpiration', 3600);
 
@@ -45,7 +34,6 @@ export class GitHubClient {
       const gist = response.data;
       console.log(`TraceAI: Gist fetched successfully, files:`, Object.keys(gist.files || {}));
 
-      // Find the TraceAI artifact file (look for .json file)
       const files = gist.files;
       if (!files) {
         console.error('TraceAI: Gist has no files');
@@ -60,7 +48,6 @@ export class GitHubClient {
             try {
               const artifact = JSON.parse(file.content) as ConversationArtifact;
 
-              // Validate it's a TraceAI artifact
               if (artifact.version && artifact.mappings && artifact.conversation) {
                 console.log(`TraceAI: Valid artifact found in ${filename}`);
                 await cache.set(gistId, artifact, cacheExpiration);
@@ -89,28 +76,20 @@ export class GitHubClient {
     }
   }
 
-  /**
-   * Alias for fetchGist - fetches Gist artifact by ID
-   */
   async fetchGistArtifact(gistId: string): Promise<ConversationArtifact | null> {
     return this.fetchGist(gistId);
   }
 
-  /**
-   * Search for TraceAI Gists associated with a repository
-   */
   async findGistsForRepo(repoFullName: string): Promise<string[]> {
     if (!this.octokit) {
       return [];
     }
 
     try {
-      // List authenticated user's gists and filter by description/content
       const response = await this.octokit.gists.list({ per_page: 100 });
       const gistIds: string[] = [];
 
       for (const gist of response.data) {
-        // Check if gist description mentions the repo
         if (gist.description?.includes(repoFullName) ||
             gist.description?.includes('traceai')) {
           gistIds.push(gist.id);
@@ -124,10 +103,6 @@ export class GitHubClient {
     }
   }
 
-  /**
-   * Fetch all TraceAI Gists for a repository and merge them into a single artifact
-   * This combines multiple conversations/PRs into one unified view
-   */
   async fetchAllGistsForRepo(repoFullName: string): Promise<ConversationArtifact | null> {
     if (!this.octokit) {
       console.warn('TraceAI: GitHub client not initialized');
@@ -137,7 +112,6 @@ export class GitHubClient {
     try {
       console.log(`TraceAI: Searching for all Gists for repo: ${repoFullName}`);
 
-      // Find all Gist IDs for this repo
       const gistIds = await this.findGistsForRepo(repoFullName);
 
       if (gistIds.length === 0) {
@@ -147,7 +121,6 @@ export class GitHubClient {
 
       console.log(`TraceAI: Found ${gistIds.length} Gists for ${repoFullName}`);
 
-      // Fetch all artifacts
       const artifacts: ConversationArtifact[] = [];
       for (const gistId of gistIds) {
         const artifact = await this.fetchGist(gistId);
@@ -161,7 +134,6 @@ export class GitHubClient {
         return null;
       }
 
-      // Merge all artifacts into one
       const merged = this.mergeArtifacts(artifacts);
       console.log(`TraceAI: Merged ${artifacts.length} artifacts with ${merged.mappings.length} total mappings`);
 
@@ -172,10 +144,6 @@ export class GitHubClient {
     }
   }
 
-  /**
-   * Merge multiple artifacts into a single unified artifact
-   * Combines mappings, conversations, and stats from all PRs
-   */
   private mergeArtifacts(artifacts: ConversationArtifact[]): ConversationArtifact {
     if (artifacts.length === 0) {
       throw new Error('Cannot merge empty artifact list');
@@ -185,16 +153,14 @@ export class GitHubClient {
       return artifacts[0];
     }
 
-    // Use the most recent artifact as the base
     const sorted = artifacts.sort((a, b) => {
       const timeA = new Date(a.metadata.end_time).getTime();
       const timeB = new Date(b.metadata.end_time).getTime();
-      return timeB - timeA; // Most recent first
+      return timeB - timeA;
     });
 
     const base = sorted[0];
 
-    // Merge all mappings
     const allMappings: typeof base.mappings = [];
     const allConversations: typeof base.conversation = [];
     let totalPrompts = 0;
@@ -202,16 +168,13 @@ export class GitHubClient {
     let filesModified = new Set<string>();
 
     for (const artifact of artifacts) {
-      // Add all mappings with PR context
       for (const mapping of artifact.mappings) {
         allMappings.push({
           ...mapping,
-          // Ensure we preserve which PR this came from
           prompt_preview: `[PR #${artifact.metadata.pr_number || 'N/A'}] ${mapping.prompt_preview}`,
         });
       }
 
-      // Merge conversations (offset indices to avoid conflicts)
       const offset = allConversations.length;
       for (const msg of artifact.conversation) {
         allConversations.push({
@@ -220,24 +183,21 @@ export class GitHubClient {
         });
       }
 
-      // Aggregate stats
       totalPrompts += artifact.stats.total_prompts;
       totalTokens += artifact.stats.total_tokens;
 
-      // Track unique files
       for (const mapping of artifact.mappings) {
         filesModified.add(mapping.file);
       }
     }
 
-    // Create merged artifact
     const merged: ConversationArtifact = {
       version: base.version,
       conversation_id: `merged-${artifacts.length}-conversations`,
       metadata: {
         ...base.metadata,
         session_id: `merged-${artifacts.map(a => a.metadata.session_id).join('-')}`,
-        pr_number: null, // Merged artifact doesn't belong to single PR
+        pr_number: null,
         gist_url: null,
       },
       mappings: allMappings,
@@ -256,5 +216,4 @@ export class GitHubClient {
   }
 }
 
-// Singleton instance
 export const githubClient = new GitHubClient();

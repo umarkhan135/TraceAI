@@ -1,6 +1,3 @@
-"""
-Command-line interface for TraceAI.
-"""
 import sys
 import json
 import os
@@ -12,7 +9,6 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.markdown import Markdown
-from rich import print as rprint
 
 from . import parser, mapper, github_client, markdown_gen, summarizer
 from .models import (
@@ -27,19 +23,12 @@ from .models import (
 console = Console()
 
 
-# ============================================================================
-# Automatic Hook Setup Helpers
-# ============================================================================
-
 def is_ci_environment() -> bool:
-    """Detect if running in a CI/CD environment."""
     ci_vars = ['CI', 'CONTINUOUS_INTEGRATION', 'GITHUB_ACTIONS', 'GITLAB_CI',
                'CIRCLECI', 'TRAVIS', 'JENKINS_HOME', 'BUILDKITE']
     return any(os.getenv(var) for var in ci_vars)
 
-
 def is_git_repo(path: Path = Path('.')) -> bool:
-    """Check if the current directory is a git repository."""
     try:
         import git
         git.Repo(path, search_parent_directories=True)
@@ -47,9 +36,7 @@ def is_git_repo(path: Path = Path('.')) -> bool:
     except:
         return False
 
-
 def get_git_repo_root(path: Path = Path('.')) -> Optional[Path]:
-    """Get the root directory of the git repository."""
     try:
         import git
         repo = git.Repo(path, search_parent_directories=True)
@@ -57,9 +44,7 @@ def get_git_repo_root(path: Path = Path('.')) -> Optional[Path]:
     except:
         return None
 
-
 def is_hook_installed(repo_root: Path) -> bool:
-    """Check if the TraceAI pre-push hook is installed."""
     hook_path = repo_root / '.git' / 'hooks' / 'pre-push'
     if not hook_path.exists():
         return False
@@ -71,9 +56,7 @@ def is_hook_installed(repo_root: Path) -> bool:
     except:
         return False
 
-
 def should_prompt_for_hook_install(repo_root: Path) -> bool:
-    """Determine if we should prompt the user to install hooks."""
     # Don't prompt in CI environments
     if is_ci_environment():
         return False
@@ -91,20 +74,13 @@ def should_prompt_for_hook_install(repo_root: Path) -> bool:
 
     return True
 
-
 def mark_hook_prompted(repo_root: Path):
-    """Mark that we've prompted the user about hook installation."""
     config_dir = repo_root / '.traceai'
     config_dir.mkdir(exist_ok=True)
     marker_file = config_dir / '.hook-prompted'
     marker_file.write_text(f"Prompted on {datetime.now().isoformat()}\n")
 
-
 def auto_setup_hook_check():
-    """
-    Automatically check if hooks should be installed and prompt user.
-    This is called before the first command runs.
-    """
     # Skip if not in a git repo
     if not is_git_repo():
         return
@@ -130,8 +106,6 @@ def auto_setup_hook_check():
     # Prompt user
     if click.confirm("Would you like to install the git hook now?", default=True):
         try:
-            # Install the hook
-            import shutil
             import git
 
             repo = git.Repo(repo_root)
@@ -180,12 +154,10 @@ def auto_setup_hook_check():
         console.print()
         mark_hook_prompted(repo_root)
 
-
 @click.group(invoke_without_command=True)
 @click.version_option(version="0.1.0")
 @click.pass_context
 def main(ctx):
-    """TraceAI - LLM-native code provenance and PR review tool."""
     # If no subcommand is provided, show help
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
@@ -210,7 +182,6 @@ def main(ctx):
     help='Specific session ID to process (default: most recent)'
 )
 def list_conversations(repo: str, session_id: Optional[str]):
-    """List all Claude Code conversations for a project."""
     repo_path = Path(repo).resolve()
 
     try:
@@ -235,7 +206,6 @@ def list_conversations(repo: str, session_id: Optional[str]):
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)
-
 
 @main.command()
 @click.argument('output_file', type=click.Path())
@@ -277,7 +247,6 @@ def process(
     no_git_correlation: bool,
     no_summary: bool
 ):
-    """Process a Claude Code conversation and generate artifact."""
     repo_path = Path(repo).resolve()
     output_path = Path(output_file)
 
@@ -375,7 +344,6 @@ def process(
     help='Update existing Gist by ID'
 )
 def upload(artifact_file: str, token: Optional[str], public: bool, update: Optional[str]):
-    """Upload artifact to GitHub Gist."""
     artifact_path = Path(artifact_file)
 
     console.print(f"[bold]Uploading {artifact_path.name} to GitHub Gist...[/bold]")
@@ -441,7 +409,6 @@ def upload(artifact_file: str, token: Optional[str], public: bool, update: Optio
     help='Include timeline view'
 )
 def pr_summary(artifact_file: str, output: Optional[str], compact: bool, timeline: bool):
-    """Generate PR summary markdown from artifact."""
     artifact_path = Path(artifact_file)
 
     try:
@@ -520,7 +487,6 @@ def pipeline(
     public: bool,
     output_dir: str
 ):
-    """Run full pipeline: process → upload → generate PR summary."""
     repo_path = Path(repo).resolve()
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -628,7 +594,6 @@ def pipeline(
 @main.command()
 @click.argument('artifact_file', type=click.Path(exists=True))
 def validate(artifact_file: str):
-    """Validate artifact JSON schema."""
     artifact_path = Path(artifact_file)
 
     try:
@@ -665,14 +630,6 @@ def validate(artifact_file: str):
     help='Skip AI summary generation'
 )
 def quick_upload(repo: str, token: Optional[str], public: bool, no_summary: bool):
-    """
-    Quick upload: Find latest session, process, and upload to Gist.
-
-    This is designed for git hooks - finds the most recent Claude Code
-    conversation, processes it, and uploads to Gist in one command.
-
-    Automatically updates existing Gist if found for the current branch.
-    """
     repo_path = Path(repo).resolve()
     config_dir = repo_path / '.traceai'
     config_file = config_dir / 'config.json'
@@ -789,14 +746,6 @@ def quick_upload(repo: str, token: Optional[str], public: bool, no_summary: bool
     help='Hook type to install'
 )
 def install_hook(type: str):
-    """
-    Install git hook for automatic TraceAI processing.
-
-    Installs a pre-push hook that automatically uploads conversations
-    to Gist when you push your code.
-    """
-    import shutil
-
     # Find git directory
     try:
         import git
@@ -843,11 +792,6 @@ def install_hook(type: str):
     help='Hook type to uninstall'
 )
 def uninstall_hook(type: str):
-    """
-    Uninstall git hook.
-
-    Removes the TraceAI hook from your repository.
-    """
     # Find git directory
     try:
         import git
@@ -892,8 +836,6 @@ def uninstall_hook(type: str):
 
 
 def generate_hook_script(hook_type: str) -> str:
-    """Generate the git hook bash script."""
-
     if hook_type == 'pre-push':
         return '''#!/bin/bash
 # TraceAI pre-push hook
@@ -1022,7 +964,6 @@ def build_artifact(
     pr_number: Optional[int],
     branch: Optional[str]
 ) -> ConversationArtifact:
-    """Build ConversationArtifact from parsed data."""
     messages = list(parser.parse_conversation(conv_file))
 
     # Build conversation messages
@@ -1123,7 +1064,6 @@ def build_artifact(
 
 
 def show_artifact_summary(artifact: ConversationArtifact):
-    """Display artifact summary."""
     console.print()
 
     table = Table(title="Artifact Summary")

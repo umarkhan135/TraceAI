@@ -1,23 +1,8 @@
-"""
-Markdown generator for TraceAI PR summaries.
-
-Generates beautiful, informative PR descriptions with conversation context.
-"""
-
 from typing import Optional, List
 from .models import ConversationArtifact, PromptCodeMapping
 
 
 def format_duration(seconds: float) -> str:
-    """
-    Format duration in seconds to human-readable string.
-
-    Args:
-        seconds: Duration in seconds
-
-    Returns:
-        Formatted string (e.g., "5 minutes", "1 hour 30 minutes")
-    """
     if seconds < 60:
         return f"{int(seconds)} seconds"
 
@@ -35,16 +20,8 @@ def format_duration(seconds: float) -> str:
 
 
 class MarkdownGenerator:
-    """Generate markdown summaries for PRs with AI conversation context."""
 
     def __init__(self, artifact: ConversationArtifact, gist_url: Optional[str] = None):
-        """
-        Initialize markdown generator.
-
-        Args:
-            artifact: ConversationArtifact to summarize
-            gist_url: Optional URL to the uploaded Gist
-        """
         self.artifact = artifact
         self.gist_url = gist_url or artifact.metadata.gist_url
 
@@ -56,52 +33,31 @@ class MarkdownGenerator:
         max_highlights: int = 5,
         include_footer: bool = True
     ) -> str:
-        """
-        Generate a complete PR summary with conversation context.
-
-        Args:
-            include_stats: Include statistics section
-            include_files: Include files modified section
-            include_highlights: Include conversation highlights
-            max_highlights: Maximum number of highlights to include
-            include_footer: Include footer with links
-
-        Returns:
-            Markdown-formatted PR summary
-        """
         sections = []
 
-        # Header
         sections.append(self._generate_header())
 
-        # Stats
         if include_stats:
             sections.append(self._generate_stats())
 
-        # Files modified
         if include_files:
             sections.append(self._generate_files_section())
 
-        # Conversation highlights
         if include_highlights:
             sections.append(self._generate_highlights(max_highlights))
 
-        # Key decisions (if any)
         key_decisions = self._extract_key_decisions()
         if key_decisions:
             sections.append(self._generate_key_decisions(key_decisions))
 
-        # Testing note
         sections.append(self._generate_testing_note())
 
-        # Footer
         if include_footer:
             sections.append(self._generate_footer())
 
         return "\n\n".join(sections)
 
     def _generate_header(self) -> str:
-        """Generate the PR summary header."""
         lines = [
             "## 🤖 AI-Generated Code Summary",
             "",
@@ -114,7 +70,6 @@ class MarkdownGenerator:
         return "\n".join(lines)
 
     def _generate_stats(self) -> str:
-        """Generate statistics section."""
         stats = self.artifact.stats
 
         lines = [
@@ -122,10 +77,9 @@ class MarkdownGenerator:
             ""
         ]
 
-        # Calculate AI-generated lines (estimate based on mappings)
         ai_lines = sum(
             (mapping.lines[1] - mapping.lines[0] + 1)
-            if mapping.lines else 10  # Default estimate if no line info
+            if mapping.lines else 10
             for mapping in self.artifact.mappings
         )
 
@@ -137,7 +91,6 @@ class MarkdownGenerator:
         if stats.total_tokens > 0:
             lines.append(f"- **Tokens Used**: {stats.total_tokens:,}")
 
-        # Duration
         if self.artifact.metadata.duration_seconds:
             duration_mins = self.artifact.metadata.duration_seconds / 60
             lines.append(
@@ -146,7 +99,6 @@ class MarkdownGenerator:
         return "\n".join(lines)
 
     def _generate_files_section(self) -> str:
-        """Generate files modified section."""
         lines = [
             "### 📝 Files Modified by AI",
             ""
@@ -156,7 +108,6 @@ class MarkdownGenerator:
             lines.append("*No file modifications recorded*")
             return "\n".join(lines)
 
-        # Group mappings by file
         files_map = {}
         for mapping in self.artifact.mappings:
             file_path = mapping.file
@@ -164,9 +115,7 @@ class MarkdownGenerator:
                 files_map[file_path] = []
             files_map[file_path].append(mapping)
 
-        # Create file list with descriptions
         for file_path, file_mappings in files_map.items():
-            # Get the first mapping for this file
             description = self._summarize_change(
                 file_mappings[0], file_mappings)
 
@@ -175,7 +124,6 @@ class MarkdownGenerator:
         return "\n".join(lines)
 
     def _generate_highlights(self, max_highlights: int) -> str:
-        """Generate conversation in alternating user/assistant format."""
         lines = [
             "### 💬 Conversation",
             ""
@@ -185,26 +133,22 @@ class MarkdownGenerator:
             lines.append("*No conversation available*")
             return "\n".join(lines)
 
-        # Select most important prompts (first, last, and middle ones)
+        user_messages = [msg for msg in self.artifact.conversation if msg.role == "user"]
         highlights = []
 
         if len(user_messages) <= max_highlights:
             highlights = user_messages
         else:
-            # First prompt
             highlights.append(user_messages[0])
 
-            # Middle prompts (sample evenly)
             step = len(user_messages) // (max_highlights - 1)
             for i in range(step, len(user_messages) - 1, step):
                 if len(highlights) >= max_highlights - 1:
                     break
                 highlights.append(user_messages[i])
 
-            # Last prompt
             highlights.append(user_messages[-1])
 
-        # Format highlights - show full prompts
         for i, msg in enumerate(highlights, 1):
             lines.append(f"**Prompt {i}**: \"{msg.content}\"")
 
@@ -216,33 +160,23 @@ class MarkdownGenerator:
         return "\n".join(lines)
 
     def _extract_key_decisions(self) -> List[str]:
-        """
-        Extract key technical decisions from the conversation.
-
-        This is a simple heuristic-based extraction. In the future,
-        this could use AI to extract decisions more intelligently.
-        """
         decisions = []
 
-        # Look for keywords in prompts that indicate decisions
         decision_keywords = [
             "use", "instead of", "chose", "decided",
             "implement", "add", "refactor", "change"
         ]
 
         for msg in self.artifact.conversation:
-            if msg.role == "user" and msg.content:  # Ensure content exists
+            if msg.role == "user" and msg.content:
                 content_lower = msg.content.lower()
                 if any(keyword in content_lower for keyword in decision_keywords):
-                    # This might be a key decision
-                    if len(msg.content) < 150:  # Keep it concise
+                    if len(msg.content) < 150:
                         decisions.append(msg.content)
 
-        # Limit to top 3 decisions
         return decisions[:3]
 
     def _generate_key_decisions(self, decisions: List[str]) -> str:
-        """Generate key decisions section."""
         lines = [
             "### 💡 Key Decisions",
             ""
@@ -254,7 +188,6 @@ class MarkdownGenerator:
         return "\n".join(lines)
 
     def _generate_testing_note(self) -> str:
-        """Generate testing section."""
         return "\n".join([
             "### 🧪 Testing",
             "",
@@ -263,7 +196,6 @@ class MarkdownGenerator:
         ])
 
     def _generate_footer(self) -> str:
-        """Generate footer with links."""
         lines = ["---", ""]
 
         footer_parts = [
@@ -280,7 +212,6 @@ class MarkdownGenerator:
         return "\n".join(lines)
 
     def _get_prompt_by_index(self, prompt_index: int) -> str:
-        """Get full prompt text by index from conversation."""
         for msg in self.artifact.conversation:
             if msg.index == prompt_index and msg.role == "user":
                 return msg.content
@@ -291,24 +222,11 @@ class MarkdownGenerator:
         first_mapping: PromptCodeMapping,
         mappings: List[PromptCodeMapping]
     ) -> str:
-        """
-        Summarize what changed in a file based on prompts.
-
-        Args:
-            first_mapping: First mapping that modified this file
-            mappings: All mappings for this file
-
-        Returns:
-            Short description of changes
-        """
-        # Get the first prompt using prompt_index
         first_prompt = self._get_prompt_by_index(first_mapping.prompt_index)
 
-        # Count different types of changes
         edits = sum(1 for m in mappings if m.tool == "Edit")
         writes = sum(1 for m in mappings if m.tool == "Write")
 
-        # Extract action from first prompt
         prompt_lower = first_prompt.lower()
 
         if "add" in prompt_lower:
@@ -324,27 +242,14 @@ class MarkdownGenerator:
         else:
             action = "Modified"
 
-        # Create description
         if len(mappings) == 1:
-            # Use the full first prompt
             return first_prompt
         else:
-            # Multiple changes
             return f"{action} functionality ({len(mappings)} changes)"
 
     def generate_commit_message(self, max_length: int = 72) -> str:
-        """
-        Generate a commit message based on the conversation.
-
-        Args:
-            max_length: Maximum length for commit subject line
-
-        Returns:
-            Git commit message
-        """
         lines = []
 
-        # Subject line (first user prompt, truncated)
         first_prompt = next(
             (msg.content for msg in self.artifact.conversation if msg.role ==
              "user" and msg.content),
@@ -358,7 +263,6 @@ class MarkdownGenerator:
         lines.append(subject)
         lines.append("")
 
-        # Body - list of files changed
         if self.artifact.mappings:
             files_map = {}
             for mapping in self.artifact.mappings:
@@ -372,7 +276,6 @@ class MarkdownGenerator:
 
         lines.append("")
 
-        # Footer
         if self.gist_url:
             lines.append(f"Conversation: {self.gist_url}")
 
