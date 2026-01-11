@@ -17,12 +17,14 @@
 
 import * as vscode from 'vscode';
 import { TraceAIHoverProvider } from './hoverProvider';
+import { TraceAIDecorationProvider } from './decorationProvider';
 import { localLoader } from './localLoader';
 import { unifiedLoader } from './unifiedLoader';
 import { cache } from './cache';
 import { githubClient } from './githubClient';
 
 let hoverProvider: TraceAIHoverProvider;
+let decorationProvider: TraceAIDecorationProvider;
 
 export function activate(context: vscode.ExtensionContext) {
   console.log('TraceAI: Extension activating...');
@@ -57,8 +59,21 @@ export function activate(context: vscode.ExtensionContext) {
     console.log('TraceAI: No GitHub token configured, running in local-only mode');
   }
 
-  // Create hover provider
+  // -------------------------------------------------------------------------
+  // DECORATION PROVIDER (GitLens-style inline annotations)
+  // -------------------------------------------------------------------------
+
+  // Create decoration provider FIRST (needed by hover provider)
+  decorationProvider = new TraceAIDecorationProvider();
+  context.subscriptions.push(decorationProvider);
+
+  // -------------------------------------------------------------------------
+  // HOVER PROVIDER (shows tooltips on decoration hover)
+  // -------------------------------------------------------------------------
+
+  // Create hover provider and connect it to decoration provider
   hoverProvider = new TraceAIHoverProvider();
+  hoverProvider.setDecorationProvider(decorationProvider);
 
   // Register hover provider for all file types
   const hoverDisposable = vscode.languages.registerHoverProvider(
@@ -67,6 +82,48 @@ export function activate(context: vscode.ExtensionContext) {
   );
   context.subscriptions.push(hoverDisposable);
 
+  // Update decorations for visible editors on activation
+  vscode.window.visibleTextEditors.forEach(editor => {
+    decorationProvider.updateDecorations(editor);
+  });
+
+  // Update decorations when active editor changes
+  const onDidChangeActiveEditor = vscode.window.onDidChangeActiveTextEditor(editor => {
+    if (editor) {
+      decorationProvider.updateDecorations(editor);
+    }
+  });
+  context.subscriptions.push(onDidChangeActiveEditor);
+
+  // Update decorations when document is opened
+  const onDidOpenTextDocument = vscode.workspace.onDidOpenTextDocument(() => {
+    const editor = vscode.window.activeTextEditor;
+    if (editor) {
+      decorationProvider.updateDecorations(editor);
+    }
+  });
+  context.subscriptions.push(onDidOpenTextDocument);
+
+  // Update decorations when document is saved (in case new mappings were added)
+  const onDidSaveTextDocument = vscode.workspace.onDidSaveTextDocument(() => {
+    const editor = vscode.window.activeTextEditor;
+    if (editor) {
+      decorationProvider.updateDecorations(editor);
+    }
+  });
+  context.subscriptions.push(onDidSaveTextDocument);
+
+  // Update decorations when config changes
+  const onDidChangeConfiguration = vscode.workspace.onDidChangeConfiguration(e => {
+    if (e.affectsConfiguration('traceai')) {
+      // Refresh all visible editors
+      vscode.window.visibleTextEditors.forEach(editor => {
+        decorationProvider.updateDecorations(editor);
+      });
+    }
+  });
+  context.subscriptions.push(onDidChangeConfiguration);
+
   // -------------------------------------------------------------------------
   // COMMANDS
   // -------------------------------------------------------------------------
@@ -74,8 +131,15 @@ export function activate(context: vscode.ExtensionContext) {
   // Refresh cache command - clears both local and GitHub caches
   const refreshCommand = vscode.commands.registerCommand('traceai.refreshCache', async () => {
     hoverProvider.clearCache();
+    decorationProvider.clear();
     await cache.clear();
-    vscode.window.showInformationMessage('TraceAI: Cache cleared');
+
+    // Refresh all visible editors
+    vscode.window.visibleTextEditors.forEach(editor => {
+      decorationProvider.updateDecorations(editor);
+    });
+
+    vscode.window.showInformationMessage('TraceAI: Cache cleared and decorations refreshed');
   });
   context.subscriptions.push(refreshCommand);
 
@@ -94,6 +158,23 @@ export function activate(context: vscode.ExtensionContext) {
     );
   });
   context.subscriptions.push(showCacheStatsCommand);
+
+  // Toggle inline decorations command
+  const toggleDecorationsCommand = vscode.commands.registerCommand('traceai.toggleInlineDecorations', async () => {
+    const config = vscode.workspace.getConfiguration('traceai');
+    const current = config.get<boolean>('enableInlineDecorations', true);
+    await config.update('enableInlineDecorations', !current, vscode.ConfigurationTarget.Global);
+
+    // Refresh decorations
+    vscode.window.visibleTextEditors.forEach(editor => {
+      decorationProvider.updateDecorations(editor);
+    });
+
+    vscode.window.showInformationMessage(
+      `TraceAI: Inline decorations ${!current ? 'enabled' : 'disabled'}`
+    );
+  });
+  context.subscriptions.push(toggleDecorationsCommand);
 
   // -------------------------------------------------------------------------
   // CONFIGURATION CHANGE LISTENER

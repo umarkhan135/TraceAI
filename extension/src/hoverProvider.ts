@@ -23,13 +23,25 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { ConversationArtifact, CodeMapping } from './types';
 import { unifiedLoader } from './unifiedLoader';
+import { TraceAIDecorationProvider } from './decorationProvider';
 
 /**
  * TraceAIHoverProvider implements VSCode's HoverProvider interface.
  * This tells VSCode to call our provideHover() method whenever
  * the user hovers over code.
+ *
+ * IMPORTANT: This provider now only shows tooltips when hovering over
+ * the inline decoration (faded text), not when hovering over the code itself.
  */
 export class TraceAIHoverProvider implements vscode.HoverProvider {
+  private decorationProvider?: TraceAIDecorationProvider;
+
+  /**
+   * Set the decoration provider to check if hover is on a decoration
+   */
+  setDecorationProvider(provider: TraceAIDecorationProvider): void {
+    this.decorationProvider = provider;
+  }
 
   /**
    * -------------------------------------------------------------------------
@@ -54,6 +66,30 @@ export class TraceAIHoverProvider implements vscode.HoverProvider {
     const config = vscode.workspace.getConfiguration('traceai');
     if (!config.get<boolean>('enableHover', true)) {
       return null;  // Hover is disabled, show nothing
+    }
+
+    // -----------------------------------------------------------------------
+    // STEP 1.5: Check if hovering over a decoration (GitLens-style behavior)
+    // -----------------------------------------------------------------------
+    // If decoration provider is set, only show hover when on the decoration
+    if (this.decorationProvider) {
+      const decorationInfo = this.decorationProvider.isPositionOnDecoration(document, position);
+
+      if (decorationInfo) {
+        // User is hovering over the decoration - show the tooltip from decoration data
+        const prompt = decorationInfo.artifact.conversation[decorationInfo.mapping.prompt_index];
+        if (prompt) {
+          const hoverContent = this.buildHoverContent(
+            decorationInfo.mapping,
+            prompt,
+            decorationInfo.artifact
+          );
+          return new vscode.Hover(hoverContent);
+        }
+      } else {
+        // User is hovering over code (not decoration) - don't show tooltip
+        return null;
+      }
     }
 
     // -----------------------------------------------------------------------

@@ -4,6 +4,7 @@ import * as path from 'path';
 import { ConversationArtifact } from './types';
 import { githubClient } from './githubClient';
 import { localLoader } from './localLoader';
+import { getRepoInfo } from './gitUtils';
 
 /**
  * Configuration file structure from .traceai/config.json
@@ -57,59 +58,96 @@ export class UnifiedLoader {
 
   /**
    * Load artifact using config.json workflow:
-   * 1. Read .traceai/config.json
-   * 2. Fetch from GitHub Gist using gist_id
-   * 3. Cache to .traceai/artifacts.json
+   * 1. Get repository information from Git
+   * 2. Fetch ALL TraceAI Gists for this repository from GitHub
+   * 3. Merge them into a unified artifact
+   * 4. Cache to .traceai/artifacts.json
+   *
+   * This enables showing AI-generated code from multiple PRs/conversations
    */
   private async loadFromConfig(workspacePath: string): Promise<ConversationArtifact | null> {
     const configPath = path.join(workspacePath, '.traceai', 'config.json');
 
-    // Check if config exists
-    if (!fs.existsSync(configPath)) {
-      console.log('TraceAI: No config.json found');
+    // Check if we have a recent cached artifact
+    const artifactsPath = path.join(workspacePath, '.traceai', 'artifacts.json');
+    if (fs.existsSync(artifactsPath)) {
+      const stats = fs.statSync(artifactsPath);
+      const now = Date.now();
+      const cacheAge = now - stats.mtimeMs;
+      const config = vscode.workspace.getConfiguration('traceai');
+      const maxAge = config.get<number>('cacheExpiration', 3600) * 1000;
+
+      // If cache is fresh, use it
+      if (cacheAge < maxAge) {
+        console.log('TraceAI: Using cached artifacts.json (fresh)');
+        try {
+          const content = fs.readFileSync(artifactsPath, 'utf8');
+          return JSON.parse(content) as ConversationArtifact;
+        } catch (error) {
+          console.warn('TraceAI: Failed to parse cached artifacts, will refetch');
+        }
+      }
+    }
+
+    // Get repository information
+    const repoInfo = await getRepoInfo(workspacePath);
+    if (!repoInfo) {
+      console.log('TraceAI: Unable to determine repository information');
+
+      // Fallback: if config.json exists, try to fetch that single Gist
+      if (fs.existsSync(configPath)) {
+        return this.loadSingleGistFromConfig(configPath, workspacePath);
+      }
+
       return null;
     }
 
+    console.log(`TraceAI: Found repository: ${repoInfo.fullName}`);
+
+    // Fetch ALL Gists for this repository
+    const artifact = await githubClient.fetchAllGistsForRepo(repoInfo.fullName);
+
+    if (!artifact) {
+      console.log('TraceAI: Failed to fetch Gists for repository');
+
+      // Fallback: if config.json exists, try to fetch that single Gist
+      if (fs.existsSync(configPath)) {
+        return this.loadSingleGistFromConfig(configPath, workspacePath);
+      }
+
+      return null;
+    }
+
+    // Cache the merged artifact locally
+    await this.cacheArtifactLocally(workspacePath, artifact);
+
+    console.log(`TraceAI: Loaded merged artifact with ${artifact.mappings.length} mappings`);
+    return artifact;
+  }
+
+  /**
+   * Fallback: Load a single Gist from config.json
+   * Used when we can't determine repository info or fetch all Gists
+   */
+  private async loadSingleGistFromConfig(
+    configPath: string,
+    workspacePath: string
+  ): Promise<ConversationArtifact | null> {
     try {
-      // Read config file
       const configContent = fs.readFileSync(configPath, 'utf8');
       const config: TraceAIConfig = JSON.parse(configContent);
 
-      console.log(`TraceAI: Found config for Gist ${config.gist_id}`);
+      console.log(`TraceAI: Falling back to single Gist: ${config.gist_id}`);
 
-      // Check if we have a cached artifacts.json that's recent
-      const artifactsPath = path.join(workspacePath, '.traceai', 'artifacts.json');
-      if (fs.existsSync(artifactsPath)) {
-        const stats = fs.statSync(artifactsPath);
-        const configStats = fs.statSync(configPath);
-
-        // If artifacts.json is newer than config.json, use it
-        if (stats.mtimeMs >= configStats.mtimeMs) {
-          console.log('TraceAI: Using cached artifacts.json (newer than config)');
-          const content = fs.readFileSync(artifactsPath, 'utf8');
-          return JSON.parse(content) as ConversationArtifact;
-        }
-      }
-
-      // Fetch from GitHub Gist
-      console.log('TraceAI: Fetching from GitHub Gist...');
       const artifact = await githubClient.fetchGist(config.gist_id);
 
-      if (!artifact) {
-        console.log('TraceAI: Failed to fetch from Gist');
-        return null;
+      if (artifact) {
+        await this.cacheArtifactLocally(workspacePath, artifact);
       }
 
-      // Cache the artifact locally
-      await this.cacheArtifactLocally(workspacePath, artifact);
-
-      console.log(`TraceAI: Loaded artifact from Gist with ${artifact.mappings.length} mappings`);
       return artifact;
-
     } catch (error) {
-      if (error instanceof Error) {
-        console.error(`TraceAI: Failed to load from config: ${error.message}`);
-      }
+      console.error('TraceAI: Failed to load single Gist from config:', error);
       return null;
     }
   }

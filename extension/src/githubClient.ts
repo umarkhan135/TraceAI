@@ -116,6 +116,137 @@ export class GitHubClient {
       return [];
     }
   }
+
+  /**
+   * Fetch all TraceAI Gists for a repository and merge them into a single artifact
+   * This combines multiple conversations/PRs into one unified view
+   */
+  async fetchAllGistsForRepo(repoFullName: string): Promise<ConversationArtifact | null> {
+    if (!this.octokit) {
+      console.warn('TraceAI: GitHub client not initialized');
+      return null;
+    }
+
+    try {
+      console.log(`TraceAI: Searching for all Gists for repo: ${repoFullName}`);
+
+      // Find all Gist IDs for this repo
+      const gistIds = await this.findGistsForRepo(repoFullName);
+
+      if (gistIds.length === 0) {
+        console.log('TraceAI: No Gists found for this repository');
+        return null;
+      }
+
+      console.log(`TraceAI: Found ${gistIds.length} Gists for ${repoFullName}`);
+
+      // Fetch all artifacts
+      const artifacts: ConversationArtifact[] = [];
+      for (const gistId of gistIds) {
+        const artifact = await this.fetchGist(gistId);
+        if (artifact) {
+          artifacts.push(artifact);
+        }
+      }
+
+      if (artifacts.length === 0) {
+        console.log('TraceAI: No valid artifacts found');
+        return null;
+      }
+
+      // Merge all artifacts into one
+      const merged = this.mergeArtifacts(artifacts);
+      console.log(`TraceAI: Merged ${artifacts.length} artifacts with ${merged.mappings.length} total mappings`);
+
+      return merged;
+    } catch (error) {
+      console.error('TraceAI: Failed to fetch all Gists:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Merge multiple artifacts into a single unified artifact
+   * Combines mappings, conversations, and stats from all PRs
+   */
+  private mergeArtifacts(artifacts: ConversationArtifact[]): ConversationArtifact {
+    if (artifacts.length === 0) {
+      throw new Error('Cannot merge empty artifact list');
+    }
+
+    if (artifacts.length === 1) {
+      return artifacts[0];
+    }
+
+    // Use the most recent artifact as the base
+    const sorted = artifacts.sort((a, b) => {
+      const timeA = new Date(a.metadata.end_time).getTime();
+      const timeB = new Date(b.metadata.end_time).getTime();
+      return timeB - timeA; // Most recent first
+    });
+
+    const base = sorted[0];
+
+    // Merge all mappings
+    const allMappings: typeof base.mappings = [];
+    const allConversations: typeof base.conversation = [];
+    let totalPrompts = 0;
+    let totalTokens = 0;
+    let filesModified = new Set<string>();
+
+    for (const artifact of artifacts) {
+      // Add all mappings with PR context
+      for (const mapping of artifact.mappings) {
+        allMappings.push({
+          ...mapping,
+          // Ensure we preserve which PR this came from
+          prompt_preview: `[PR #${artifact.metadata.pr_number || 'N/A'}] ${mapping.prompt_preview}`,
+        });
+      }
+
+      // Merge conversations (offset indices to avoid conflicts)
+      const offset = allConversations.length;
+      for (const msg of artifact.conversation) {
+        allConversations.push({
+          ...msg,
+          index: msg.index + offset,
+        });
+      }
+
+      // Aggregate stats
+      totalPrompts += artifact.stats.total_prompts;
+      totalTokens += artifact.stats.total_tokens;
+
+      // Track unique files
+      for (const mapping of artifact.mappings) {
+        filesModified.add(mapping.file);
+      }
+    }
+
+    // Create merged artifact
+    const merged: ConversationArtifact = {
+      version: base.version,
+      conversation_id: `merged-${artifacts.length}-conversations`,
+      metadata: {
+        ...base.metadata,
+        session_id: `merged-${artifacts.map(a => a.metadata.session_id).join('-')}`,
+        pr_number: null, // Merged artifact doesn't belong to single PR
+        gist_url: null,
+      },
+      mappings: allMappings,
+      conversation: allConversations,
+      stats: {
+        total_messages: allConversations.length,
+        total_prompts: totalPrompts,
+        files_modified: filesModified.size,
+        total_tokens: totalTokens,
+        ai_generated_lines: null,
+      },
+      summary: null,
+    };
+
+    return merged;
+  }
 }
 
 // Singleton instance
