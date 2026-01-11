@@ -3,6 +3,7 @@ Command-line interface for TraceAI.
 """
 import sys
 import json
+import os
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
@@ -26,11 +27,175 @@ from .models import (
 console = Console()
 
 
-@click.group()
+# ============================================================================
+# Automatic Hook Setup Helpers
+# ============================================================================
+
+def is_ci_environment() -> bool:
+    """Detect if running in a CI/CD environment."""
+    ci_vars = ['CI', 'CONTINUOUS_INTEGRATION', 'GITHUB_ACTIONS', 'GITLAB_CI',
+               'CIRCLECI', 'TRAVIS', 'JENKINS_HOME', 'BUILDKITE']
+    return any(os.getenv(var) for var in ci_vars)
+
+
+def is_git_repo(path: Path = Path('.')) -> bool:
+    """Check if the current directory is a git repository."""
+    try:
+        import git
+        git.Repo(path, search_parent_directories=True)
+        return True
+    except:
+        return False
+
+
+def get_git_repo_root(path: Path = Path('.')) -> Optional[Path]:
+    """Get the root directory of the git repository."""
+    try:
+        import git
+        repo = git.Repo(path, search_parent_directories=True)
+        return Path(repo.working_dir)
+    except:
+        return None
+
+
+def is_hook_installed(repo_root: Path) -> bool:
+    """Check if the TraceAI pre-push hook is installed."""
+    hook_path = repo_root / '.git' / 'hooks' / 'pre-push'
+    if not hook_path.exists():
+        return False
+
+    # Check if it's our hook by looking for TraceAI signature
+    try:
+        content = hook_path.read_text()
+        return 'TraceAI pre-push hook' in content
+    except:
+        return False
+
+
+def should_prompt_for_hook_install(repo_root: Path) -> bool:
+    """Determine if we should prompt the user to install hooks."""
+    # Don't prompt in CI environments
+    if is_ci_environment():
+        return False
+
+    # Don't prompt if hook is already installed
+    if is_hook_installed(repo_root):
+        return False
+
+    # Check if we've already prompted (and user declined)
+    config_dir = repo_root / '.traceai'
+    marker_file = config_dir / '.hook-prompted'
+
+    if marker_file.exists():
+        return False
+
+    return True
+
+
+def mark_hook_prompted(repo_root: Path):
+    """Mark that we've prompted the user about hook installation."""
+    config_dir = repo_root / '.traceai'
+    config_dir.mkdir(exist_ok=True)
+    marker_file = config_dir / '.hook-prompted'
+    marker_file.write_text(f"Prompted on {datetime.now().isoformat()}\n")
+
+
+def auto_setup_hook_check():
+    """
+    Automatically check if hooks should be installed and prompt user.
+    This is called before the first command runs.
+    """
+    # Skip if not in a git repo
+    if not is_git_repo():
+        return
+
+    repo_root = get_git_repo_root()
+    if not repo_root:
+        return
+
+    # Check if we should prompt
+    if not should_prompt_for_hook_install(repo_root):
+        return
+
+    # Show friendly prompt
+    console.print()
+    console.print("[bold cyan]💡 TraceAI Git Hook Setup[/bold cyan]")
+    console.print()
+    console.print("TraceAI can automatically upload conversations to GitHub Gist")
+    console.print("when you push code by installing a git pre-push hook.")
+    console.print()
+    console.print("[dim]This enables the VSCode extension to show code provenance.[/dim]")
+    console.print()
+
+    # Prompt user
+    if click.confirm("Would you like to install the git hook now?", default=True):
+        try:
+            # Install the hook
+            import shutil
+            import git
+
+            repo = git.Repo(repo_root)
+            git_dir = Path(repo.git_dir)
+            hooks_dir = git_dir / 'hooks'
+            hooks_dir.mkdir(exist_ok=True)
+
+            hook_path = hooks_dir / 'pre-push'
+
+            # Check if hook already exists (non-TraceAI hook)
+            if hook_path.exists():
+                console.print("[yellow]Warning: pre-push hook already exists[/yellow]")
+                if not click.confirm("Overwrite?", default=False):
+                    mark_hook_prompted(repo_root)
+                    console.print("[yellow]Hook installation cancelled.[/yellow]")
+                    console.print("[dim]You can install it later with: traceai install-hook[/dim]")
+                    console.print()
+                    return
+
+            # Create hook script
+            hook_script = generate_hook_script('pre-push')
+
+            with open(hook_path, 'w') as f:
+                f.write(hook_script)
+
+            # Make executable
+            hook_path.chmod(0o755)
+
+            console.print("[green]✓ Git hook installed successfully![/green]")
+            console.print()
+            console.print("[bold]Next steps:[/bold]")
+            console.print("1. Set GITHUB_TOKEN in your environment or .env file")
+            console.print("2. Push your code - the hook will run automatically")
+            console.print()
+
+            # Mark as prompted
+            mark_hook_prompted(repo_root)
+
+        except Exception as e:
+            console.print(f"[red]Error installing hook: {e}[/red]")
+            console.print("[dim]You can install it manually with: traceai install-hook[/dim]")
+            mark_hook_prompted(repo_root)
+    else:
+        console.print()
+        console.print("[dim]No problem! You can install it later with: traceai install-hook[/dim]")
+        console.print()
+        mark_hook_prompted(repo_root)
+
+
+@click.group(invoke_without_command=True)
 @click.version_option(version="0.1.0")
-def main():
+@click.pass_context
+def main(ctx):
     """TraceAI - LLM-native code provenance and PR review tool."""
-    pass
+    # If no subcommand is provided, show help
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+        return
+
+    # Auto-check for hook installation on first command
+    # Only run this check for certain commands (not for install-hook itself)
+    skip_commands = ['install-hook', 'uninstall-hook']
+    if ctx.invoked_subcommand not in skip_commands:
+        auto_setup_hook_check()
 
 
 @main.command()
@@ -670,6 +835,62 @@ def install_hook(type: str):
     console.print("3. Create a PR - GitHub Action will update the description")
 
 
+@main.command()
+@click.option(
+    '--type',
+    type=click.Choice(['pre-push', 'post-commit']),
+    default='pre-push',
+    help='Hook type to uninstall'
+)
+def uninstall_hook(type: str):
+    """
+    Uninstall git hook.
+
+    Removes the TraceAI hook from your repository.
+    """
+    # Find git directory
+    try:
+        import git
+        repo = git.Repo('.', search_parent_directories=True)
+        git_dir = Path(repo.git_dir)
+        repo_root = Path(repo.working_dir)
+    except:
+        console.print("[red]Error: Not in a git repository[/red]")
+        sys.exit(1)
+
+    hook_path = git_dir / 'hooks' / type
+
+    # Check if hook exists
+    if not hook_path.exists():
+        console.print(f"[yellow]No {type} hook found[/yellow]")
+        sys.exit(0)
+
+    # Check if it's our hook
+    try:
+        content = hook_path.read_text()
+        if 'TraceAI' not in content:
+            console.print(f"[yellow]Warning: {type} hook exists but doesn't appear to be a TraceAI hook[/yellow]")
+            if not click.confirm("Remove anyway?", default=False):
+                sys.exit(0)
+    except:
+        pass
+
+    # Remove the hook
+    try:
+        hook_path.unlink()
+        console.print(f"[green]✓ Removed {type} hook[/green]")
+
+        # Also remove the marker file so we can prompt again if needed
+        marker_file = repo_root / '.traceai' / '.hook-prompted'
+        if marker_file.exists():
+            marker_file.unlink()
+            console.print("[dim]Reset hook prompt state[/dim]")
+
+    except Exception as e:
+        console.print(f"[red]Error removing hook: {e}[/red]")
+        sys.exit(1)
+
+
 def generate_hook_script(hook_type: str) -> str:
     """Generate the git hook bash script."""
 
@@ -701,6 +922,13 @@ if [ -z "$GITHUB_TOKEN" ]; then
   exit 0
 fi
 
+# Check if config.json already exists and is staged
+# If so, this means we already processed this in a previous hook run
+if git diff --cached --name-only | grep -q "^.traceai/config.json$"; then
+  # Config is already staged, this is the retry push - let it through
+  exit 0
+fi
+
 echo "🤖 TraceAI: Processing conversation..."
 
 # Find and upload latest session
@@ -717,13 +945,26 @@ if [ $EXIT_CODE -eq 0 ]; then
   if [ -n "$GIST_URL" ]; then
     # Check if config file was created/updated
     if [ -f ".traceai/config.json" ]; then
-      # Add config to git (will be pushed with this push)
-      git add .traceai/config.json
+      # Check if config.json has changed
+      if ! git diff --quiet .traceai/config.json 2>/dev/null; then
+        echo "✅ TraceAI: Uploaded to $GIST_URL"
+        echo ""
+        echo "📝 Adding TraceAI config to commit..."
 
-      # Commit it (with --no-verify to avoid recursive hook)
-      git commit -m "chore: update TraceAI conversation artifact" --no-verify 2>/dev/null || true
+        # Add config to git
+        git add .traceai/config.json
 
-      echo "✅ TraceAI: Uploaded to $GIST_URL"
+        # Amend the last commit to include the config
+        # This works because we're in pre-push, before the push happens
+        git commit --amend --no-edit --no-verify 2>/dev/null || {
+          # If amend fails (maybe nothing to amend), create new commit
+          git commit -m "chore: update TraceAI conversation artifact" --no-verify 2>/dev/null || true
+        }
+
+        echo "✓ Config included in commit"
+      else
+        echo "✅ TraceAI: Config already up to date"
+      fi
     else
       echo "⚠️  TraceAI: Config file not found"
     fi

@@ -172,49 +172,29 @@ class MarkdownGenerator:
         return "\n".join(lines)
 
     def _generate_highlights(self, max_highlights: int) -> str:
-        """Generate conversation highlights."""
+        """Generate conversation in alternating user/assistant format."""
         lines = [
-            "### 🔍 Conversation Highlights",
+            "### 💬 Conversation",
             ""
         ]
 
-        # Get user messages
-        user_messages = [
-            msg for msg in self.artifact.conversation
-            if msg.role == "user"
-        ]
-
-        if not user_messages:
-            lines.append("*No conversation highlights available*")
+        if not self.artifact.conversation:
+            lines.append("*No conversation available*")
             return "\n".join(lines)
 
-        # Select most important prompts (first, last, and middle ones)
-        highlights = []
-
-        if len(user_messages) <= max_highlights:
-            highlights = user_messages
-        else:
-            # First prompt
-            highlights.append(user_messages[0])
-
-            # Middle prompts (sample evenly)
-            step = len(user_messages) // (max_highlights - 1)
-            for i in range(step, len(user_messages) - 1, step):
-                if len(highlights) >= max_highlights - 1:
-                    break
-                highlights.append(user_messages[i])
-
-            # Last prompt
-            highlights.append(user_messages[-1])
-
-        # Format highlights
-        for i, msg in enumerate(highlights, 1):
-            content_preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
-            lines.append(f"**Prompt {i}**: \"{content_preview}\"")
-
-        if len(user_messages) > max_highlights:
-            lines.append("")
-            lines.append(f"*... and {len(user_messages) - max_highlights} more prompts in the full conversation*")
+        # Format the full conversation
+        for msg in self.artifact.conversation:
+            if msg.role == "user":
+                # User prompt (plain text)
+                lines.append(msg.content)
+                lines.append("")
+            elif msg.role == "assistant":
+                # Assistant response (quoted with >)
+                # Split content into lines and prefix each with >
+                response_lines = msg.content.split("\n")
+                for response_line in response_lines:
+                    lines.append(f"> {response_line}")
+                lines.append("")
 
         return "\n".join(lines)
 
